@@ -242,12 +242,12 @@ export default function PlayPage() {
           </h1>
           <button
             type="button"
-            onClick={() => navigate('/changelog')}
+            onClick={() => navigate('/license')}
             className="size-10 flex items-center justify-center rounded-lg transition-colors"
             style={{ color: '#f1e7d9' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = '#221d19'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            aria-label="更新日志"
+            aria-label="开源协议"
           >
             <Info className="size-5" />
           </button>
@@ -293,7 +293,7 @@ export default function PlayPage() {
 
           {/* 音量旋钮 */}
           <div className="flex-shrink-0 pl-1">
-            <VolumeKnob value={prefs.volume} onChange={handleVolumeChange} size={48} theme="dark" />
+            <VolumeKnob value={prefs.volume} onChange={handleVolumeChange} size={54} theme="dark" />
           </div>
 
           {/* 右侧留空 */}

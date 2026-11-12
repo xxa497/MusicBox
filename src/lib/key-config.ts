@@ -13,8 +13,10 @@ export interface KeyConfig {
   index: number;
   /** 音高标识，C4 D4 等；中立区为 null */
   pitch: string | null;
-  /** 简谱显示文本，含高音点 */
+  /** 简谱显示文本 */
   label: string;
+  /** 高音键：数字上方单独绘制高音点 */
+  dot?: boolean;
 }
 
 // 正常模式
@@ -26,8 +28,8 @@ export const KEY_CONFIG_NORMAL: KeyConfig[] = [
   { index: 4, pitch: 'G4', label: '5' },
   { index: 5, pitch: 'A4', label: '6' },
   { index: 6, pitch: 'B4', label: '7' },
-  { index: 7, pitch: 'C5', label: '1̇' },
-  { index: 8, pitch: 'D5', label: '2̇' },
+  { index: 7, pitch: 'C5', label: '1', dot: true },
+  { index: 8, pitch: 'D5', label: '2', dot: true },
 ];
 
 // 滑键模式：中间 4 为中立区，周围 8 键环绕
@@ -38,7 +40,7 @@ export const KEY_CONFIG_SLIDE: KeyConfig[] = [
   { index: 0, pitch: 'C4', label: '1' },
   { index: 1, pitch: 'D4', label: '2' },
   { index: 2, pitch: 'E4', label: '3' },
-  { index: 3, pitch: 'C5', label: '1̇' },
+  { index: 3, pitch: 'C5', label: '1', dot: true },
   { index: 4, pitch: null, label: '—' },
   { index: 5, pitch: 'F4', label: '4' },
   { index: 6, pitch: 'B4', label: '7' },

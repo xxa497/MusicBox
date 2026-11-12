@@ -11,6 +11,33 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '4',
+    version: 'v2.1.1',
+    date: '2026-11-12',
+    items: [
+      {
+        type: 'adjust',
+        text: '高音 1、高音 2 的高音点改为单独绘制在数字正上方，不再与数字笔画重叠；正常模式与滑键模式同步调整，数字位置仍与其它键对齐。',
+      },
+      {
+        type: 'fix',
+        text: '音量旋钮改为按圆周角度拖动调节，按下后转动即生效，小幅度拖动也能连续变化，不再出现转不动、几乎没反应的情况。',
+      },
+      {
+        type: 'adjust',
+        text: '九键按键之间的间距加大，滑奏时手指经过缝隙更不容易误触相邻按键。',
+      },
+      {
+        type: 'adjust',
+        text: '移除界面右下角的平台生成标识，与应用界面风格统一。',
+      },
+      {
+        type: 'new',
+        text: '顶栏右上角的信息按钮改为打开「开源协议」页面，说明本项目的 MPL-2.0 授权要点；更新日志仍从左侧抽屉进入。',
+      },
+    ],
+  },
+  {
     id: '3',
     version: 'v1.1.1',
     date: '2026-11-12',

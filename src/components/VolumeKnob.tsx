@@ -10,38 +10,62 @@ interface VolumeKnobProps {
 
 /**
  * 圆形音量旋钮
- * - 拖动旋转：在旋钮上按下并上下/圆周拖动
+ * - 圆周拖动：按下后沿圆圈转动调节（按角度增量累计，避免小范围拖动没反应）
  * - 滚轮调节
  * - 上下方向键调节（聚焦时）
- * 角度范围：约 -135° 到 135°，对应 0-100
+ * 旋钮可视角度范围：-135° ~ 135°，对应 0-100
  */
+const SWEEP = 270; // 有效旋转角度
+
 function VolumeKnob({ value, onChange, size = 56, theme = 'dark' }: VolumeKnobProps) {
   const knobRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ y: number; value: number }>({ y: 0, value: 0 });
+  const dragRef = useRef({ active: false, lastAngle: 0, accum: 0, startValue: 0 });
 
-  const angle = -135 + (value / 100) * 270; // -135° ~ 135°
+  const angle = -135 + (value / 100) * SWEEP; // -135° ~ 135°
+
+  const getAngle = useCallback((clientX: number, clientY: number) => {
+    const el = knobRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    return (Math.atan2(clientY - cy, clientX - cx) * 180) / Math.PI;
+  }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(true);
-    dragStartRef.current = { y: e.clientY, value };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [value]);
+    dragRef.current = {
+      active: true,
+      lastAngle: getAngle(e.clientX, e.clientY),
+      accum: 0,
+      startValue: value,
+    };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch { /* ignore */ }
+  }, [getAngle, value]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging) return;
-    const dy = dragStartRef.current.y - e.clientY;
-    // 每 200px 拖动 = 100% 音量
-    const delta = (dy / 200) * 100;
-    const next = Math.max(0, Math.min(100, dragStartRef.current.value + delta));
-    onChange(Math.round(next));
-  }, [isDragging, onChange]);
+    if (!dragRef.current.active) return;
+    const a = getAngle(e.clientX, e.clientY);
+    let delta = a - dragRef.current.lastAngle;
+    // 跨过 ±180° 时的角度回绕处理
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    dragRef.current.lastAngle = a;
+    dragRef.current.accum += delta;
 
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const next = dragRef.current.startValue + (dragRef.current.accum / SWEEP) * 100;
+    onChange(Math.round(Math.max(0, Math.min(100, next))));
+  }, [getAngle, onChange]);
+
+  const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current.active = false;
     setIsDragging(false);
     try {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch { /* ignore */ }
   }, []);
 
@@ -76,7 +100,6 @@ function VolumeKnob({ value, onChange, size = 56, theme = 'dark' }: VolumeKnobPr
   const innerBg = dark ? '#2d2620' : '';
   const borderColor = dark ? '#332c25' : '';
   const pointerColor = dark ? '#e8a86a' : '';
-  const centerColor = dark ? '#e8a86a' : '';
   const ringColor = dark ? '#e8a86a' : '';
 
   return (
@@ -90,14 +113,16 @@ function VolumeKnob({ value, onChange, size = 56, theme = 'dark' }: VolumeKnobPr
       tabIndex={0}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onLostPointerCapture={endDrag}
       onWheel={handleWheel}
       onKeyDown={handleKeyDown}
-      className="relative cursor-grab active:cursor-grabbing select-none outline-none focus-visible:ring-2 rounded-full"
+      className="relative cursor-grab active:cursor-grabbing select-none outline-none focus-visible:ring-2 rounded-full touch-none"
       style={{
         width: size,
         height: size,
+        touchAction: 'none',
         ...(dark ? { '--tw-ring-color': ringColor } as React.CSSProperties : {}),
       }}
     >

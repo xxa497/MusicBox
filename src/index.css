@@ -4,3 +4,10 @@
 @import "tw-animate-css";
 @import "./tailwind-theme.css";
 @import "./typography.css";
+/* 去掉平台生成标识水印，与应用视觉不符（水印在自定义元素的 Shadow DOM 里，需隐藏宿主） */
+[data-custom-element*="watermark"],
+miaoda-watermark {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}

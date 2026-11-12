@@ -9,7 +9,7 @@ export const MOCK_GUIDE_SECTIONS: IGuideSection[] = [
   {
     id: '1',
     title: '顶部按钮',
-    content: '左侧菜单按钮打开抽屉，右侧信息按钮查看更新日志。'
+    content: '左侧菜单按钮打开抽屉（使用说明、更新日志），右侧信息按钮打开开源协议页面。'
   },
   {
     id: '2',
@@ -19,7 +19,7 @@ export const MOCK_GUIDE_SECTIONS: IGuideSection[] = [
   {
     id: '3',
     title: '音域与音量',
-    content: '音域显示当前音高范围，音量框显示百分比，圆形旋钮可拖动或滚轮调节。'
+    content: '音域显示当前音高范围，音量框显示百分比，圆形旋钮可沿圆周拖动、或用滚轮、方向键调节。'
   },
   {
     id: '4',

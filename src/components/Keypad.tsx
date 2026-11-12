@@ -129,7 +129,7 @@ function Keypad({
   return (
     <div
       ref={gridRef}
-      className="grid grid-cols-3 gap-2 sm:gap-2.5 touch-none select-none w-full max-w-[320px] mx-auto"
+      className="grid grid-cols-3 gap-4 sm:gap-5 touch-none select-none w-full max-w-[344px] mx-auto"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -157,7 +157,27 @@ function Keypad({
             ].join(' ')}
             style={{ touchAction: 'none' }}
           >
-            <span className="leading-none">{k.label}</span>
+            <span className="relative inline-flex items-center justify-center leading-none">
+              <span className="leading-none">{k.label}</span>
+              {/* 高音点：绝对定位在数字正上方，数字本身仍与其它键对齐 */}
+              {k.dot && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: '-0.64em',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: '0.13em',
+                    height: '0.13em',
+                    minWidth: 4,
+                    minHeight: 4,
+                    borderRadius: '50%',
+                    background: '#2b241d',
+                  }}
+                />
+              )}
+            </span>
           </button>
         );
       })}
