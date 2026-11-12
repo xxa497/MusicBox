@@ -12,7 +12,7 @@ export interface IChangelogEntry {
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
     id: '3',
-    version: 'v1.2.1',
+    version: 'v1.1.1',
     date: '2026-11-12',
     items: [
       {
