@@ -11,6 +11,21 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '5',
+    version: 'v2.1.2',
+    date: '2026-11-12',
+    items: [
+      {
+        type: 'adjust',
+        text: '按键间距再加大一档，同时把按键之间的缝隙改成不发声的空档：手指划到缝隙时不再吸附到最近的按键，必须先经过空档再落到目标键，划奏时不会撞响旁边的键。',
+      },
+      {
+        type: 'fix',
+        text: '音域改按乐理记法标注：中央 C 记作 c¹（小字一组），高音区记作 c²（小字二组），低于小字组的音记作 c（小字组）与 C（大字组）；音域框主行显示乐理记法，副行显示 C4 – D5 国际记法。',
+      },
+    ],
+  },
+  {
     id: '4',
     version: 'v2.1.1',
     date: '2026-11-12',

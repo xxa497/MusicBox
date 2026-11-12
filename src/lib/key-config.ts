@@ -64,42 +64,80 @@ export function getLabelByKeyIndex(index: number, mode: 'normal' | 'slide'): str
 
 /**
  * 计算当前音域范围（基于八度偏移）
- * 中文记法：小字一组 c¹ = C4，小字二组 c² = C5，以此类推
- * 即音名后的数字 - 3 = 上标数字（小字 n 组）
+ *
+ * 乐理记法（按《音乐理论基础》通用写法）：
+ *   小字一组   c¹  d¹  —— 中央 C 所在的一组（C4 = c¹）
+ *   小字二组   c²  d²
+ *   小字组     c   d    （无组号）
+ *   大字组     C   D    （大写，无下标）
+ *   大字一组   C₁  D₁
+ *   大字二组   C₂  D₂
+ * 即：octave ≥ 4 为小写＋上标(octave-3)，octave = 3 为小写无标号，
+ *     octave ≤ 2 为大写＋下标(2-octave)（octave=2 无下标）。
  */
 export function getRangeDisplay(octaveOffset: number): {
-  lowPitch: string;
-  highPitch: string;
+  /** 乐理记法：c¹ – d² */
   lowSolfège: string;
   highSolfège: string;
+  /** 国际记法：C4 – D5 */
+  lowPitch: string;
+  highPitch: string;
+  /** 中文组名：小字一组 / 小字二组 */
+  lowGroup: string;
+  highGroup: string;
 } {
-  // 基准音域 C4 - D5（偏移 0）
-  const baseLowOctave = 4 + octaveOffset;   // C 的八度号
-  const baseHighOctave = 5 + octaveOffset;  // D 的八度号
-  // 小字组：C4 -> 小字一组 -> 上标 1 = 4 - 3
-  const lowSup = baseLowOctave - 3;
-  const highSup = baseHighOctave - 3;
+  const lowOctave = 4 + octaveOffset;  // 低音为 C
+  const highOctave = 5 + octaveOffset; // 高音为 D
   return {
-    lowPitch: `C${baseLowOctave}`,
-    highPitch: `D${baseHighOctave}`,
-    lowSolfège: `c${superscriptOrEmpty(lowSup)}`,
-    highSolfège: `d${superscriptOrEmpty(highSup)}`,
+    lowPitch: `C${lowOctave}`,
+    highPitch: `D${highOctave}`,
+    lowSolfège: solfegeName('c', lowOctave),
+    highSolfège: solfegeName('d', highOctave),
+    lowGroup: groupName(lowOctave),
+    highGroup: groupName(highOctave),
   };
 }
 
-/** 上标数字：n<=0 返回空串（大字组/中央C以下暂简化为空），n>=1 返回对应上标 */
-function superscriptOrEmpty(n: number): string {
-  if (n <= 0) return '';
-  return superscript(n);
-}
-
-function superscript(n: number): string {
-  const map: Record<number, string> = {
-    0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴',
-    5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹',
-  };
-  if (n >= 0) {
-    return String(n).split('').map(d => map[Number(d)] ?? d).join('');
+/** 单个音名的乐理写法 */
+function solfegeName(letter: 'c' | 'd', octave: number): string {
+  if (octave >= 4) {
+    // 小字一组及以上：小写 + 上标组号
+    return `${letter}${toSuperscript(octave - 3)}`;
   }
-  return '₋' + String(Math.abs(n)).split('').map(d => map[Number(d)] ?? d).join('');
+  if (octave === 3) {
+    // 小字组：小写，无组号
+    return letter;
+  }
+  // 大字组及以下：大写 + 下标（大字组本身无下标）
+  const sub = 2 - octave;
+  return `${letter.toUpperCase()}${sub > 0 ? toSubscript(sub) : ''}`;
+}
+
+/** 组名（中文） */
+function groupName(octave: number): string {
+  if (octave >= 4) return `小字${toCnNumber(octave - 3)}组`;
+  if (octave === 3) return '小字组';
+  const sub = 2 - octave;
+  return sub > 0 ? `大字${toCnNumber(sub)}组` : '大字组';
+}
+
+function toCnNumber(n: number): string {
+  const map: Record<number, string> = { 1: '一', 2: '二', 3: '三', 4: '四', 5: '五' };
+  return map[n] ?? String(n);
+}
+
+function toSuperscript(n: number): string {
+  const map: Record<string, string> = {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  };
+  return String(n).split('').map(d => map[d] ?? d).join('');
+}
+
+function toSubscript(n: number): string {
+  const map: Record<string, string> = {
+    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+    '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+  };
+  return String(n).split('').map(d => map[d] ?? d).join('');
 }

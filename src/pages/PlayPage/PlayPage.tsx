@@ -273,10 +273,10 @@ export default function PlayPage() {
             style={{ borderColor: '#e8a86a', background: '#1a1613' }}
           >
             <div className="text-sm font-semibold tabular-nums" style={{ color: '#f1e7d9' }}>
-              {range.lowPitch} – {range.highPitch}
+              {range.lowSolfège} – {range.highSolfège}
             </div>
             <div className="text-[10px] tabular-nums mt-0.5" style={{ color: '#9a8d7d' }}>
-              {range.lowSolfège} – {range.highSolfège}
+              {range.lowPitch} – {range.highPitch}
             </div>
           </div>
 

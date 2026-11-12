@@ -23,7 +23,11 @@ function Keypad({
   // 每个 pointer 当前所在按键索引（GAP 表示在缝隙里）
   const pointerKeyMapRef = useRef<Map<number, number>>(new Map());
 
-  /** 命中测试：先精确命中按键，落在缝隙时吸附到最近的按键（手指仍算在网格内） */
+  /**
+   * 命中测试：只有真正落在键上才发声。
+   * 按键之间的缝隙是「空档」——返回 GAP，既不发声、也不吸附到最近的键，
+   * 手指需要在空档里停一下再移到目标键，避免划奏时撞到旁边的键。
+   */
   const getKeyFromPoint = useCallback((clientX: number, clientY: number): number | null => {
     const grid = gridRef.current;
     if (!grid) return null;
@@ -32,10 +36,13 @@ function Keypad({
     const keyEl = el?.closest('[data-key-index]') as HTMLElement | null;
     if (keyEl && grid.contains(keyEl)) {
       const attr = keyEl.getAttribute('data-key-index');
-      if (attr !== null) return parseInt(attr, 10);
+      if (attr !== null) {
+        const parseIdx = parseInt(attr, 10);
+        // 中立区（滑键模式正中）同样视为空档
+        if (parseIdx >= 0) return parseIdx;
+      }
     }
 
-    // 缝隙 / 落在子元素边缘：在网格范围内就吸附到最近的按键，避免滑动在缝隙处断掉
     const gridRect = grid.getBoundingClientRect();
     if (
       clientX < gridRect.left ||
@@ -45,24 +52,8 @@ function Keypad({
     ) {
       return null;
     }
-
-    const nodes = grid.querySelectorAll<HTMLElement>('[data-key-index]');
-    let nearest: number | null = null;
-    let nearestDist = Infinity;
-    nodes.forEach((node) => {
-      const r = node.getBoundingClientRect();
-      const dx = clientX < r.left ? r.left - clientX : clientX > r.right ? clientX - r.right : 0;
-      const dy = clientY < r.top ? r.top - clientY : clientY > r.bottom ? clientY - r.bottom : 0;
-      const dist = dx * dx + dy * dy;
-      if (dist < nearestDist) {
-        const attr = node.getAttribute('data-key-index');
-        if (attr !== null) {
-          nearestDist = dist;
-          nearest = parseInt(attr, 10);
-        }
-      }
-    });
-    return nearest;
+    // 在网格内但没命中键：空档
+    return GAP;
   }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -76,7 +67,7 @@ function Keypad({
     } catch { /* ignore */ }
 
     pointerKeyMapRef.current.set(e.pointerId, idx);
-    onKeyDown?.(idx, e.pointerId, 'press');
+    if (idx !== GAP) onKeyDown?.(idx, e.pointerId, 'press');
   }, [getKeyFromPoint, onKeyDown]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -129,7 +120,7 @@ function Keypad({
   return (
     <div
       ref={gridRef}
-      className="grid grid-cols-3 gap-4 sm:gap-5 touch-none select-none w-full max-w-[344px] mx-auto"
+      className="grid grid-cols-3 gap-5 sm:gap-6 touch-none select-none w-full max-w-[344px] mx-auto"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
