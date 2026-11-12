@@ -10,6 +10,9 @@ interface KeypadProps {
   onKeyUp?: (index: number, pointerId: number, source: 'release' | 'slide') => void;
 }
 
+/** -1 表示手指在网格内但落在按键缝隙上（不发声，但仍保持跟踪） */
+const GAP = -1;
+
 function Keypad({
   keys,
   activeKeyIndices,
@@ -17,18 +20,49 @@ function Keypad({
   onKeyUp,
 }: KeypadProps) {
   const gridRef = useRef<HTMLDivElement>(null);
-  // 每个 pointer 当前所在按键索引
+  // 每个 pointer 当前所在按键索引（GAP 表示在缝隙里）
   const pointerKeyMapRef = useRef<Map<number, number>>(new Map());
 
+  /** 命中测试：先精确命中按键，落在缝隙时吸附到最近的按键（手指仍算在网格内） */
   const getKeyFromPoint = useCallback((clientX: number, clientY: number): number | null => {
     const grid = gridRef.current;
     if (!grid) return null;
+
     const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-    if (!el) return null;
-    const keyEl = el.closest('[data-key-index]') as HTMLElement | null;
-    if (!keyEl || !grid.contains(keyEl)) return null;
-    const idx = keyEl.getAttribute('data-key-index');
-    return idx !== null ? parseInt(idx, 10) : null;
+    const keyEl = el?.closest('[data-key-index]') as HTMLElement | null;
+    if (keyEl && grid.contains(keyEl)) {
+      const attr = keyEl.getAttribute('data-key-index');
+      if (attr !== null) return parseInt(attr, 10);
+    }
+
+    // 缝隙 / 落在子元素边缘：在网格范围内就吸附到最近的按键，避免滑动在缝隙处断掉
+    const gridRect = grid.getBoundingClientRect();
+    if (
+      clientX < gridRect.left ||
+      clientX > gridRect.right ||
+      clientY < gridRect.top ||
+      clientY > gridRect.bottom
+    ) {
+      return null;
+    }
+
+    const nodes = grid.querySelectorAll<HTMLElement>('[data-key-index]');
+    let nearest: number | null = null;
+    let nearestDist = Infinity;
+    nodes.forEach((node) => {
+      const r = node.getBoundingClientRect();
+      const dx = clientX < r.left ? r.left - clientX : clientX > r.right ? clientX - r.right : 0;
+      const dy = clientY < r.top ? r.top - clientY : clientY > r.bottom ? clientY - r.bottom : 0;
+      const dist = dx * dx + dy * dy;
+      if (dist < nearestDist) {
+        const attr = node.getAttribute('data-key-index');
+        if (attr !== null) {
+          nearestDist = dist;
+          nearest = parseInt(attr, 10);
+        }
+      }
+    });
+    return nearest;
   }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -50,56 +84,47 @@ function Keypad({
     if (!pointerKeyMapRef.current.has(e.pointerId)) return;
 
     const idx = getKeyFromPoint(e.clientX, e.clientY);
-    const prev = pointerKeyMapRef.current.get(e.pointerId) ?? null;
+    const prev = pointerKeyMapRef.current.get(e.pointerId) ?? GAP;
+    const next = idx === null ? GAP : idx;
 
-    if (idx === prev) return; // 没换键
+    if (next === prev) return; // 没换键
 
     const pid = e.pointerId;
 
-    // 离开旧键
-    if (prev !== null) {
+    // 离开旧键（旧标记是缝隙时无需停音）
+    if (prev !== GAP) {
       onKeyUp?.(prev, pid, 'slide');
     }
 
-    if (idx !== null) {
-      // 进入新键
-      pointerKeyMapRef.current.set(pid, idx);
-      onKeyDown?.(idx, pid, 'slide');
-    } else {
-      // 移出网格
-      pointerKeyMapRef.current.delete(pid);
+    // 始终保留跟踪，滑出缝隙 / 移出网格后仍能重新进入按键
+    pointerKeyMapRef.current.set(pid, next);
+    if (next !== GAP) {
+      onKeyDown?.(next, pid, 'slide');
     }
   }, [getKeyFromPoint, onKeyDown, onKeyUp]);
 
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const pid = e.pointerId;
-    const idx = pointerKeyMapRef.current.get(pid);
-    if (idx !== undefined) {
-      onKeyUp?.(idx, pid, 'release');
-      pointerKeyMapRef.current.delete(pid);
+  const releasePointer = useCallback((pointerId: number, source: 'release' | 'slide') => {
+    const idx = pointerKeyMapRef.current.get(pointerId);
+    if (idx !== undefined && idx !== GAP) {
+      onKeyUp?.(idx, pointerId, source);
     }
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(pid);
-    } catch { /* ignore */ }
+    pointerKeyMapRef.current.delete(pointerId);
   }, [onKeyUp]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    releasePointer(e.pointerId, 'release');
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch { /* ignore */ }
+  }, [releasePointer]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const pid = e.pointerId;
-    const idx = pointerKeyMapRef.current.get(pid);
-    if (idx !== undefined) {
-      onKeyUp?.(idx, pid, 'release');
-      pointerKeyMapRef.current.delete(pid);
-    }
-  }, [onKeyUp]);
+    releasePointer(e.pointerId, 'release');
+  }, [releasePointer]);
 
   const handleLostPointerCapture = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const pid = e.pointerId;
-    const idx = pointerKeyMapRef.current.get(pid);
-    if (idx !== undefined) {
-      onKeyUp?.(idx, pid, 'release');
-      pointerKeyMapRef.current.delete(pid);
-    }
-  }, [onKeyUp]);
+    releasePointer(e.pointerId, 'release');
+  }, [releasePointer]);
 
   return (
     <div

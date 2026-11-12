@@ -11,6 +11,25 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '3',
+    version: 'v1.2.1',
+    date: '2026-11-12',
+    items: [
+      {
+        type: 'fix',
+        text: '滑键模式无法连续滑动的问题：手指从两个按键之间的缝隙滑过时，触点被误判成已经离开并丢失跟踪，后面整段滑动都不再响应；现在缝隙只停止发声，触点仍保持跟踪，滑回按键立刻恢复演奏。',
+      },
+      {
+        type: 'adjust',
+        text: '手指落在按键缝隙上时，就近吸附到最近的按键，滑动过渡更连贯，不再出现滑到一半声音断掉、怎么滑都没反应的情况。',
+      },
+      {
+        type: 'adjust',
+        text: '滑到中间中立区仍然只停音不发声，行为保持不变。',
+      },
+    ],
+  },
+  {
     id: '2',
     version: 'v1.0.1',
     date: '2026-11-12',
