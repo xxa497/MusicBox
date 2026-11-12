@@ -56,3 +56,20 @@ $BT/apksigner verify build/MusicBox-v1.0.0.apk
 ## 为什么内置 HTTP 服务
 
 前端产物是 ES module（`<script type="module">`）。WebView 直接加载 `file://` 时，模块脚本会因 CORS（origin 为 null）被拒绝，`localStorage` 也会受限。`MainActivity` 在本机回环地址上起一个只读静态服务提供 `assets/www`，WebView 用 `http://127.0.0.1:<port>/index.html` 加载，模块、DOM Storage、Web Audio 都正常。
+
+## 明文 HTTP 放行（重要）
+
+Android 9（API 28）起默认禁止明文 HTTP。应用走的是 `http://127.0.0.1`，不放行会直接报 `net::ERR_CLEARTEXT_NOT_PERMITTED`、页面打不开。
+
+`res/xml/network_security_config.xml` 只对本机回环地址放行明文，其他域名仍然禁止：
+
+```xml
+<base-config cleartextTrafficPermitted="false" />
+<domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">127.0.0.1</domain>
+    <domain includeSubdomains="false">localhost</domain>
+</domain-config>
+```
+
+Manifest 里通过 `android:networkSecurityConfig="@xml/network_security_config"` 引用，并保留 `android:usesCleartextTraffic="true"`。
+

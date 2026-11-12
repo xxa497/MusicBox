@@ -11,9 +11,24 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '2',
+    version: 'v1.0.1',
+    date: '2026-11-12',
+    items: [
+      {
+        type: 'fix',
+        text: 'Android 安装版打开后停在「网页无法打开」，进不去界面的问题。Android 9 起系统默认禁止应用访问明文 HTTP 地址，应用改为只对本机回环地址放行。',
+      },
+      {
+        type: 'adjust',
+        text: '安装包版本号同步为 1.0.1。',
+      },
+    ],
+  },
+  {
     id: '1',
     version: 'v1.0.0',
-    date: '',
+    date: '2026-11-12',
     items: [
       {
         type: 'fix',
