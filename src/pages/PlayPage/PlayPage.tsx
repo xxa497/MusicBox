@@ -72,12 +72,13 @@ export default function PlayPage() {
       endTime: null,
       lane: index,
       color: getAmberColor(pitch),
+      accidental: prefs.accidental,
     };
 
     setNotes(prev => [...prev, newNote]);
     setActiveKeyIndices(prev => new Set(prev).add(index));
-    pianoEngine.noteOn(pitch, prefs.octaveOffset);
-  }, [keys, prefs.octaveOffset]);
+    pianoEngine.noteOn(pitch, prefs.octaveOffset, prefs.accidental);
+  }, [keys, prefs.octaveOffset, prefs.accidental]);
 
   /**
    * 停止一个 pointer 对应的音（只停这一路）
@@ -128,14 +129,16 @@ export default function PlayPage() {
    * 把正在按住的音符在当前时刻收尾，再在同一条音轨上开一段新的（split 标记），
    * 两段紧贴在一起、中间画一条细接缝，所以看得出一条被断成了两段。
    */
-  const splitHeldNotesForOctave = useCallback((newOffset: number) => {
+  const splitHeldNotes = useCallback((next: { octaveOffset: number; accidental: 0 | 1 | -1 }) => {
     const held = Array.from(pointerNoteMapRef.current.entries());
     if (held.length === 0) return;
 
     const now = performance.now();
 
     // 老段收尾
-    setNotes(prev => prev.map(n => (n.endTime === null ? { ...n, endTime: now } : n)));
+    setNotes(prev =>
+      prev.map(n => (n.endTime === null ? { ...n, endTime: now, splitTail: true } : n)),
+    );
 
     const segments: NoteBarData[] = [];
     held.forEach(([pointerId, rec]) => {
@@ -144,7 +147,7 @@ export default function PlayPage() {
 
       // 声音：停掉旧八度的音，按新八度重新发声，听感上不断
       pianoEngine.noteOff(key.pitch);
-      pianoEngine.noteOn(key.pitch, newOffset);
+      pianoEngine.noteOn(key.pitch, next.octaveOffset, next.accidental);
 
       const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
       pointerNoteMapRef.current.set(pointerId, { noteId, index: rec.index, lane: rec.index });
@@ -158,6 +161,7 @@ export default function PlayPage() {
         lane: rec.index,
         split: true,
         color: getAmberColor(key.pitch),
+        accidental: next.accidental,
       });
     });
 
@@ -165,21 +169,29 @@ export default function PlayPage() {
   }, [keys]);
 
   // 八度切换
+  /** 升号 / 降号：同一个键再按一次回到还原 */
+  const toggleAccidental = useCallback((value: 1 | -1) => {
+    const next = prefs.accidental === value ? 0 : value;
+    splitHeldNotes({ octaveOffset: prefs.octaveOffset, accidental: next });
+    setPrefs(p => ({ ...p, accidental: next }));
+    toast.success(next === 1 ? '升记号（♯）' : next === -1 ? '降记号（♭）' : '还原');
+  }, [prefs.accidental, prefs.octaveOffset, splitHeldNotes]);
+
   const octaveUp = useCallback(() => {
     const next = Math.min(2, prefs.octaveOffset + 1);
     if (next === prefs.octaveOffset) return;
-    splitHeldNotesForOctave(next);
+    splitHeldNotes({ octaveOffset: next, accidental: prefs.accidental });
     setPrefs(p => ({ ...p, octaveOffset: next }));
     toast.success('音域升高一个八度');
-  }, [prefs.octaveOffset, splitHeldNotesForOctave]);
+  }, [prefs.octaveOffset, prefs.accidental, splitHeldNotes]);
 
   const octaveDown = useCallback(() => {
     const next = Math.max(-2, prefs.octaveOffset - 1);
     if (next === prefs.octaveOffset) return;
-    splitHeldNotesForOctave(next);
+    splitHeldNotes({ octaveOffset: next, accidental: prefs.accidental });
     setPrefs(p => ({ ...p, octaveOffset: next }));
     toast.success('音域降低一个八度');
-  }, [prefs.octaveOffset, splitHeldNotesForOctave]);
+  }, [prefs.octaveOffset, prefs.accidental, splitHeldNotes]);
 
   // 模式切换
   const toggleMode = useCallback(() => {
@@ -299,7 +311,7 @@ export default function PlayPage() {
       <div className="flex-1 w-full px-1 sm:px-4 pb-4 sm:pb-6 pt-2 flex items-start justify-center">
         <div className="flex gap-2 sm:gap-4 w-full max-w-[460px]">
           {/* 左侧工具栏 */}
-          <div className="flex-shrink-0 flex flex-col gap-2 pt-1">
+          <div className="flex-shrink-0 flex flex-col gap-1 pt-1">
             <button
               type="button"
               onPointerDown={(e) => { e.stopPropagation(); octaveUp(); }}
@@ -361,6 +373,37 @@ export default function PlayPage() {
             >
               <Trash2 className="size-4" />
             </button>
+
+            {/* 升降记号：按一次生效，再按一次回到还原；演奏中按住琴键也能按 */}
+            {([
+              { value: 1 as const, glyph: '♯', label: '升记号', tip: '升' },
+              { value: -1 as const, glyph: '♭', label: '降记号', tip: '降' },
+            ]).map((btn) => {
+              const active = prefs.accidental === btn.value;
+              return (
+                <button
+                  key={btn.label}
+                  type="button"
+                  onPointerDown={(e) => { e.stopPropagation(); toggleAccidental(btn.value); }}
+                  className="size-11 rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
+                  style={{
+                    background: active ? '#3a2c1e' : '#221d19',
+                    borderColor: active ? '#e8a86a' : '#332c25',
+                    color: active ? '#f5c894' : '#9a8d7d',
+                  }}
+                  aria-label={btn.label}
+                  aria-pressed={active}
+                >
+                  <span className="text-base leading-none">{btn.glyph}</span>
+                  <span
+                    className="text-[9px] leading-none mt-0.5"
+                    style={{ color: active ? '#f5c894' : '#7d7266' }}
+                  >
+                    {btn.tip}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* 中间按键组 */}

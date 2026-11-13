@@ -12,6 +12,8 @@ export interface NoteBarData {
   split?: boolean;
   /** 换音域时被断开的上一段：底部改成平角，与后半段对齐，避免多出圆角尖角 */
   splitTail?: boolean;
+  /** 升降记号：1 升号 ♯、-1 降号 ♭、0 还原 */
+  accidental?: 0 | 1 | -1;
   /** 颜色 */
   color: string;
 }
@@ -133,6 +135,28 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
       if (rTop > 0) ctx.quadraticCurveTo(x, y, x + rTop, y);
       ctx.closePath();
       ctx.fill();
+
+      // 升降记号：直接标在这条音符上，不另开音轨。
+      // 用条子末端的深色圆点当徽标，条子再短也能看清，不会为了塞字把条子撑高。
+      if (note.accidental === 1 || note.accidental === -1) {
+        const glyph = note.accidental === 1 ? '♯' : '♭';
+        const rBadge = Math.min(8, Math.max(6, bw / 2 - 1));
+        const cx = x + bw / 2;
+        const cy = Math.max(rBadge + 1, bottomY - rBadge - 2);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, rBadge, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(43, 36, 29, 0.92)';
+        ctx.fill();
+
+        ctx.font = `600 ${Math.round(rBadge * 1.55)}px ui-sans-serif, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#f5c894';
+        ctx.fillText(glyph, cx, cy + 0.5);
+        ctx.restore();
+      }
 
       // 接缝：断成两段时的分界线，画在上一段的最后一像素上，两段仍然严丝合缝
       if (note.split) {

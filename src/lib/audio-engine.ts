@@ -51,16 +51,16 @@ export class PianoEngine {
     }
   }
 
-  getFrequency(pitch: string, octaveOffset: number): number {
+  getFrequency(pitch: string, octaveOffset: number, accidental: number = 0): number {
     const base = NOTE_FREQ_MAP[pitch];
     if (!base) return 440;
-    return base * Math.pow(2, octaveOffset);
+    return base * Math.pow(2, octaveOffset) * Math.pow(2, accidental / 12);
   }
 
   /**
    * 触发一个音符的按下（Attack）
    */
-  noteOn(pitch: string, octaveOffset: number = 0): void {
+  noteOn(pitch: string, octaveOffset: number = 0, accidental: number = 0): void {
     const ctx = this.ensureContext();
     const noteKey = pitch;
     // 如果这个音已经在响，先停掉再重新触发（避免叠音失控）
@@ -68,7 +68,7 @@ export class PianoEngine {
       this.noteOff(pitch);
     }
 
-    const freq = this.getFrequency(pitch, octaveOffset);
+    const freq = this.getFrequency(pitch, octaveOffset, accidental);
     const now = ctx.currentTime;
 
     // 三个振荡器叠加模拟钢琴泛音

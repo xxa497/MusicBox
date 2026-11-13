@@ -6,12 +6,15 @@ export interface IMusicBoxPrefs {
   volume: number;
   octaveOffset: number;
   mode: 'normal' | 'slide';
+  /** 升降记号：0 还原、1 升号（♯）、-1 降号（♭） */
+  accidental: 0 | 1 | -1;
 }
 
 const DEFAULT_PREFS: IMusicBoxPrefs = {
   volume: 70,
   octaveOffset: 0,
   mode: 'normal',
+  accidental: 0,
 };
 
 export function loadPrefs(): IMusicBoxPrefs {
@@ -23,6 +26,7 @@ export function loadPrefs(): IMusicBoxPrefs {
       volume: typeof parsed.volume === 'number' ? Math.max(0, Math.min(100, parsed.volume)) : DEFAULT_PREFS.volume,
       octaveOffset: typeof parsed.octaveOffset === 'number' ? parsed.octaveOffset : DEFAULT_PREFS.octaveOffset,
       mode: parsed.mode === 'slide' ? 'slide' : 'normal',
+      accidental: parsed.accidental === 1 || parsed.accidental === -1 ? parsed.accidental : 0,
     };
   } catch {
     return { ...DEFAULT_PREFS };
