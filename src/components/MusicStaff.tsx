@@ -8,8 +8,10 @@ export interface NoteBarData {
   endTime: number | null;
   /** 所在音轨：等于按键索引（0-8），每条音轨固定对应一个按键 */
   lane: number;
-  /** 换音域时断出的后半段：顶部画一条接缝，与前半段区分 */
+  /** 换音域时断出的后半段：顶部改成平角并画接缝，与前半段区分 */
   split?: boolean;
+  /** 换音域时被断开的上一段：底部改成平角，与后半段对齐，避免多出圆角尖角 */
+  splitTail?: boolean;
   /** 颜色 */
   color: string;
 }
@@ -110,6 +112,7 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
       const bh = bottomY - topY;
       const r = Math.min(8, bw / 2, bh / 2);
       const rTop = note.split ? 0 : r;
+      const rBottom = note.splitTail ? 0 : r;
 
       // 琥珀色渐变填充（亮→主→深，沿长度方向）
       const barGrad = ctx.createLinearGradient(x, y, x, y + bh);
@@ -122,18 +125,26 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
       ctx.moveTo(x + rTop, y);
       ctx.lineTo(x + bw - rTop, y);
       if (rTop > 0) ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
-      ctx.lineTo(x + bw, y + bh - r);
-      ctx.quadraticCurveTo(x + bw, y + bh, x + bw - r, y + bh);
-      ctx.lineTo(x + r, y + bh);
-      ctx.quadraticCurveTo(x, y + bh, x, y + bh - r);
-      ctx.lineTo(x, y + r);
-      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.lineTo(x + bw, y + bh - rBottom);
+      if (rBottom > 0) ctx.quadraticCurveTo(x + bw, y + bh, x + bw - rBottom, y + bh);
+      ctx.lineTo(x + rBottom, y + bh);
+      if (rBottom > 0) ctx.quadraticCurveTo(x, y + bh, x, y + bh - rBottom);
+      ctx.lineTo(x, y + rTop);
+      if (rTop > 0) ctx.quadraticCurveTo(x, y, x + rTop, y);
       ctx.closePath();
       ctx.fill();
 
-      // 顶部高光
-      ctx.fillStyle = 'rgba(255, 240, 210, 0.35)';
-      ctx.fillRect(x + 2, y + 2, bw - 4, 3);
+      // 接缝：断成两段时的分界线，画在上一段的最后一像素上，两段仍然严丝合缝
+      if (note.split) {
+        ctx.fillStyle = 'rgba(20, 17, 15, 0.95)';
+        ctx.fillRect(x, y - 1, bw, 1);
+      }
+
+      // 顶部高光（断出的后半段不画，否则接缝处会多出一条亮边）
+      if (!note.split) {
+        ctx.fillStyle = 'rgba(255, 240, 210, 0.35)';
+        ctx.fillRect(x + 2, y + 2, bw - 4, 3);
+      }
     }
 
     // 底部音轨标签

@@ -11,6 +11,17 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '10',
+    version: 'v2.2.6',
+    date: '2026-11-13',
+    items: [
+      {
+        type: 'fix',
+        text: '修正两段音符接缝处的形状：交界处前后两段都做成平角、等宽对齐，只保留一条细接缝，不再多出圆角缺口和凸起的尖角。',
+      },
+    ],
+  },
+  {
     id: '9',
     version: 'v2.2.5',
     date: '2026-11-13',
@@ -23,6 +34,7 @@ export const MOCK_CHANGELOGS: IChangelogEntry[] = [
         type: 'new',
         text: '按住某个音时切换音域，正在按住的音符会在切换那一刻断成两段：前半段和后半段都留在它原来那条音轨上，紧贴在一起，中间有一条细接缝，看得出是一段被断开的两段；声音会按新音域接着响。',
       },
+
     ],
   },
   {
