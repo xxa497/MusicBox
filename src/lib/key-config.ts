@@ -63,19 +63,17 @@ export function getLabelByKeyIndex(index: number, mode: 'normal' | 'slide'): str
 }
 
 /**
- * 计算当前音域范围（基于八度偏移）
+ * 计算当前音域范围（基于八度偏移与实际按键音高）
  *
- * 乐理记法（按《音乐理论基础》通用写法）：
- *   小字一组   c¹  d¹  —— 中央 C 所在的一组（C4 = c¹）
- *   小字二组   c²  d²
- *   小字组     c   d    （无组号）
- *   大字组     C   D    （大写，无下标）
- *   大字一组   C₁  D₁
- *   大字二组   C₂  D₂
- * 即：octave ≥ 4 为小写＋上标(octave-3)，octave = 3 为小写无标号，
- *     octave ≤ 2 为大写＋下标(2-octave)（octave=2 无下标）。
+ * 两个模式的可达音高不同：
+ *   正常模式  C4 ~ D5（c¹ ~ d²）
+ *   滑键模式  C4 ~ C5（c¹ ~ c²，最高只到高音 1）
+ * 因此范围直接从按键配置里取最低/最高音，避免两种模式标成同一区间。
  */
-export function getRangeDisplay(octaveOffset: number): {
+export function getRangeDisplay(
+  octaveOffset: number,
+  mode: 'normal' | 'slide' = 'normal',
+): {
   /** 乐理记法：c¹ – d² */
   lowSolfège: string;
   highSolfège: string;
@@ -86,20 +84,41 @@ export function getRangeDisplay(octaveOffset: number): {
   lowGroup: string;
   highGroup: string;
 } {
-  const lowOctave = 4 + octaveOffset;  // 低音为 C
-  const highOctave = 5 + octaveOffset; // 高音为 D
+  const pitches = getKeyConfig(mode)
+    .map(k => k.pitch)
+    .filter((p): p is string => p !== null);
+
+  let lowest = pitches[0] ?? 'C4';
+  let highest = pitches[0] ?? 'D5';
+  for (const pitch of pitches) {
+    if (comparePitch(pitch, lowest) < 0) lowest = pitch;
+    if (comparePitch(pitch, highest) > 0) highest = pitch;
+  }
+
+  const lowLetter = lowest[0].toLowerCase() as 'c' | 'd';
+  const highLetter = highest[0].toLowerCase() as 'c' | 'd';
+  const lowOctave = Number(lowest.slice(1)) + octaveOffset;
+  const highOctave = Number(highest.slice(1)) + octaveOffset;
+
   return {
-    lowPitch: `C${lowOctave}`,
-    highPitch: `D${highOctave}`,
-    lowSolfège: solfegeName('c', lowOctave),
-    highSolfège: solfegeName('d', highOctave),
+    lowPitch: `${lowest[0]}${lowOctave}`,
+    highPitch: `${highest[0]}${highOctave}`,
+    lowSolfège: solfegeName(lowLetter, lowOctave),
+    highSolfège: solfegeName(highLetter, highOctave),
     lowGroup: groupName(lowOctave),
     highGroup: groupName(highOctave),
   };
 }
 
+/** 音高比较：按半音序号（八度 × 12 + 音级），跨八度比较才正确 */
+function comparePitch(a: string, b: string): number {
+  const semitone: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const value = (p: string) => Number(p.slice(1)) * 12 + (semitone[p[0]] ?? 0);
+  return value(a) - value(b);
+}
+
 /** 单个音名的乐理写法 */
-function solfegeName(letter: 'c' | 'd', octave: number): string {
+function solfegeName(letter: 'c' | 'd' | 'e' | 'f' | 'g' | 'a' | 'b', octave: number): string {
   if (octave >= 4) {
     // 小字一组及以上：小写 + 上标组号
     return `${letter}${toSuperscript(octave - 3)}`;

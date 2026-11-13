@@ -11,6 +11,29 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '6',
+    version: 'v2.2.2',
+    date: '2026-11-13',
+    items: [
+      {
+        type: 'fix',
+        text: '音域框改为按当前模式显示实际可达范围：滑键模式最高只到高音 1，显示 c¹ – c²（C4 – C5）；正常模式显示 c¹ – d²（C4 – D5）。',
+      },
+      {
+        type: 'fix',
+        text: '滑键模式下两指同时按两个键，现在会各占一条，不再合并成一条音符。',
+      },
+      {
+        type: 'fix',
+        text: '长按一个键期间再按别的键，新音会另起一条，不再叠在长条上合成一条。分列改为按时间重叠分配，同屏并发的音互相不挤占。',
+      },
+      {
+        type: 'adjust',
+        text: '演奏中（还按着键时）：音域上下切换、模式切换、音量调节都可以正常操作；清空按钮置灰禁用，避免误触清掉乐谱。',
+      },
+    ],
+  },
+  {
     id: '5',
     version: 'v2.1.2',
     date: '2026-11-12',

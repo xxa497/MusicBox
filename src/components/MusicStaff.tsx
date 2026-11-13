@@ -6,16 +6,16 @@ export interface NoteBarData {
   label: string;
   startTime: number;
   endTime: number | null;
-  /** 批次内列索引，0 起 */
-  columnIndex: number;
-  /** 同批总数，用于分列 */
-  totalInBatch: number;
+  /** 所在列（按时间重叠分配，0 起） */
+  lane: number;
   /** 颜色 */
   color: string;
 }
 
 interface MusicStaffProps {
   notes: NoteBarData[];
+  /** 乐谱列数（由同时按住的最多音符数决定） */
+  laneCount: number;
   /** 瀑布流滚动速度 px/s */
   scrollSpeed?: number;
   /** 每毫秒对应多少像素的音符长度（按住时长→视觉长度） */
@@ -27,7 +27,7 @@ const AMBER_LIGHT = '#f5c894';
 const AMBER_MAIN = '#e8a86a';
 const AMBER_DEEP = '#c78a4d';
 
-function MusicStaff({ notes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProps) {
+function MusicStaff({ notes, laneCount, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
@@ -71,13 +71,13 @@ function MusicStaff({ notes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProp
 
       if (bottomY < 0) continue;
 
-      // 分列计算 x 坐标与宽度
-      const totalCols = note.totalInBatch;
-      const marginX = 40;
+      // 分列计算 x 坐标与宽度（列数固定，音符不会因新音加入而横向跳动）
+      const totalCols = Math.max(laneCount, 1);
+      const marginX = 14;
       const usableW = w - marginX * 2;
-      const colW = usableW / Math.max(totalCols, 1);
-      const barW = Math.min(40, colW * 0.75);
-      const colX = marginX + note.columnIndex * colW + (colW - barW) / 2;
+      const colW = usableW / totalCols;
+      const barW = Math.max(16, Math.min(40, colW * 0.7));
+      const colX = marginX + note.lane * colW + (colW - barW) / 2;
 
       const x = colX;
       const y = topY;
@@ -109,7 +109,7 @@ function MusicStaff({ notes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProp
       ctx.fillStyle = 'rgba(255, 240, 210, 0.35)';
       ctx.fillRect(x + 2, y + 2, bw - 4, 3);
     }
-  }, [notes, scrollSpeed, pxPerMs]);
+  }, [notes, laneCount, scrollSpeed, pxPerMs]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

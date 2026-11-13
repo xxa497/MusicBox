@@ -18,15 +18,11 @@ export default function PlayPage() {
   const [notes, setNotes] = useState<NoteBarData[]>([]);
   const [activeKeyIndices, setActiveKeyIndices] = useState<Set<number>>(new Set());
 
-  // 每个 pointerId 对应的 noteBarId（按 pointer 独立跟踪，防止音泄漏）
-  const pointerNoteMapRef = useRef<Map<number, { noteId: string; index: number }>>(new Map());
-  // 当前同时按下批次（80ms 窗口内的多指点按算同一批，分列显示）
-  const currentBatchRef = useRef<{
-    batchId: string;
-    pointerIds: number[];
-    _firstPressTime: number;
-  } | null>(null);
-  const SIMULTANEOUS_WINDOW = 80;
+  // 每个 pointerId 对应的音符（按 pointer 独立跟踪，防止音泄漏）
+  const pointerNoteMapRef = useRef<Map<number, { noteId: string; index: number; lane: number }>>(new Map());
+  // 当前乐谱使用的列数：只在需要时增加，保证已有音符的横向位置不跳动
+  const laneCountRef = useRef(1);
+  const [laneCount, setLaneCount] = useState(1);
 
   // 保存偏好 + 同步音量
   useEffect(() => {
@@ -35,7 +31,7 @@ export default function PlayPage() {
   }, [prefs]);
 
   const keys = useMemo(() => getKeyConfig(prefs.mode), [prefs.mode]);
-  const range = useMemo(() => getRangeDisplay(prefs.octaveOffset), [prefs.octaveOffset]);
+  const range = useMemo(() => getRangeDisplay(prefs.octaveOffset, prefs.mode), [prefs.octaveOffset, prefs.mode]);
 
   // 清理已完全滚出屏幕的音符
   useEffect(() => {
@@ -50,58 +46,35 @@ export default function PlayPage() {
 
   /**
    * 触发一个音符开始
-   * @param index 按键索引
-   * @param pointerId 触点唯一 ID
-   * @param isSimultaneous 是否参与同时按下分列（true=正常模式多指；false=滑键/单音单列）
+   *
+   * 分列规则：按「时间重叠」占列——当前仍按住（尚未松开）的音各自占一列，
+   * 新音落在第一个空列上。这样：
+   *  - 滑键模式两指同时按，会各占一列，不会再叠成一条
+   *  - 长按一个键期间再按别的键，新音另起一列，不会叠在长条上
    */
-  const startNote = useCallback((index: number, pointerId: number, isSimultaneous: boolean) => {
+  const startNote = useCallback((index: number, pointerId: number) => {
     const key = keys[index];
     if (!key || key.pitch === null) return; // 中立区不发音
 
     const now = performance.now();
     const pitch = key.pitch;
 
-    let batchId: string;
-    let totalInBatch: number;
-    let columnIndex: number;
+    // 已占用列（仍按住、尚未松开的音）
+    const lanesInUse = new Set<number>();
+    pointerNoteMapRef.current.forEach(v => lanesInUse.add(v.lane));
 
-    if (isSimultaneous) {
-      const batch = currentBatchRef.current;
-      if (batch && now - batch._firstPressTime < SIMULTANEOUS_WINDOW) {
-        // 同一批次（同时按下）
-        batchId = batch.batchId;
-        batch.pointerIds.push(pointerId);
-        totalInBatch = batch.pointerIds.length;
-        columnIndex = totalInBatch - 1;
-        // 更新同批已存在音符的 totalInBatch
-        setNotes(prev => prev.map(n =>
-          n.id.startsWith(batchId + ':') ? { ...n, totalInBatch } : n
-        ));
-      } else {
-        // 新批次
-        batchId = `b${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        totalInBatch = 1;
-        columnIndex = 0;
-        currentBatchRef.current = {
-          batchId,
-          pointerIds: [pointerId],
-          _firstPressTime: now,
-        };
-        setTimeout(() => {
-          if (currentBatchRef.current?.batchId === batchId) {
-            currentBatchRef.current = null;
-          }
-        }, SIMULTANEOUS_WINDOW + 20);
-      }
-    } else {
-      // 滑键 / 单音：独立批次，单列
-      batchId = `s${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      totalInBatch = 1;
-      columnIndex = 0;
+    let lane = 0;
+    while (lanesInUse.has(lane)) lane += 1;
+
+    // 列数只增不减：新音需要更多列时扩展，已有音位置保持
+    const nextLaneCount = Math.max(laneCountRef.current, lane + 1);
+    if (nextLaneCount !== laneCountRef.current) {
+      laneCountRef.current = nextLaneCount;
+      setLaneCount(nextLaneCount);
     }
 
-    const noteId = `${batchId}:${pointerId}`;
-    pointerNoteMapRef.current.set(pointerId, { noteId, index });
+    const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
+    pointerNoteMapRef.current.set(pointerId, { noteId, index, lane });
 
     const newNote: NoteBarData = {
       id: noteId,
@@ -109,8 +82,7 @@ export default function PlayPage() {
       label: key.label,
       startTime: now,
       endTime: null,
-      columnIndex,
-      totalInBatch,
+      lane,
       color: getAmberColor(pitch),
     };
 
@@ -153,25 +125,11 @@ export default function PlayPage() {
     pointerNoteMapRef.current.delete(pointerId);
   }, [keys]);
 
-  const handleKeyDown = useCallback((index: number, pointerId: number, source: 'press' | 'slide') => {
+  const handleKeyDown = useCallback((index: number, pointerId: number, _source: 'press' | 'slide') => {
     const key = keys[index];
-    if (!key) return;
-
-    if (prefs.mode === 'normal') {
-      // 正常模式：参与同时按下判定（多指分列）
-      if (key.pitch !== null) {
-        startNote(index, pointerId, true);
-      }
-    } else {
-      // 滑键模式：
-      // - 按下(press)：单音单列
-      // - 滑动(slide)：单音单列（滑到新键替换前一个）
-      if (key.pitch !== null) {
-        startNote(index, pointerId, false);
-      }
-      // 中立区：不发音（stopNote 已经在离开前一个键时被调用过了）
-    }
-  }, [keys, prefs.mode, startNote]);
+    if (!key || key.pitch === null) return;
+    startNote(index, pointerId);
+  }, [keys, startNote]);
 
   const handleKeyUp = useCallback((index: number, pointerId: number, _source: 'release' | 'slide') => {
     stopNote(index, pointerId);
@@ -194,7 +152,6 @@ export default function PlayPage() {
     pianoEngine.allNotesOff();
     setActiveKeyIndices(new Set());
     pointerNoteMapRef.current.clear();
-    currentBatchRef.current = null;
     const now = performance.now();
     setNotes(prev => prev.map(n => n.endTime === null ? { ...n, endTime: now } : n));
 
@@ -206,7 +163,8 @@ export default function PlayPage() {
     pianoEngine.allNotesOff();
     setActiveKeyIndices(new Set());
     pointerNoteMapRef.current.clear();
-    currentBatchRef.current = null;
+    laneCountRef.current = 1;
+    setLaneCount(1);
     setNotes([]);
     toast.success('已清空乐谱');
   }, []);
@@ -214,6 +172,9 @@ export default function PlayPage() {
   const handleVolumeChange = useCallback((v: number) => {
     setPrefs(p => ({ ...p, volume: v }));
   }, []);
+
+  // 演奏中（还有键被按住）：音域上下、模式切换、音量仍可用，清空禁用以免误触
+  const isPlaying = activeKeyIndices.size > 0;
 
   return (
     <div
@@ -260,7 +221,7 @@ export default function PlayPage() {
           className="w-full h-[180px] sm:h-[220px] md:h-[260px] rounded-xl border overflow-hidden"
           style={{ borderColor: '#332c25' }}
         >
-          <MusicStaff notes={notes} />
+          <MusicStaff notes={notes} laneCount={laneCount} />
         </div>
       </div>
 
@@ -351,12 +312,18 @@ export default function PlayPage() {
             <button
               type="button"
               onClick={clearStaff}
-              className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm"
-              style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = '#221d19'; }}
-              onMouseDown={(e) => { e.currentTarget.style.background = '#3a3128'; }}
-              onMouseUp={(e) => { e.currentTarget.style.background = '#221d19'; }}
+              disabled={isPlaying}
+              className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm disabled:cursor-not-allowed"
+              style={{
+                background: isPlaying ? '#1a1613' : '#221d19',
+                borderColor: '#332c25',
+                color: isPlaying ? '#5a4f42' : '#f1e7d9',
+                opacity: isPlaying ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => { if (!isPlaying) e.currentTarget.style.background = '#2d2620'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = isPlaying ? '#1a1613' : '#221d19'; }}
+              onMouseDown={(e) => { if (!isPlaying) e.currentTarget.style.background = '#3a3128'; }}
+              onMouseUp={(e) => { e.currentTarget.style.background = isPlaying ? '#1a1613' : '#221d19'; }}
               aria-label="清空"
             >
               <Trash2 className="size-4" />
