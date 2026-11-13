@@ -160,3 +160,18 @@ function toSubscript(n: number): string {
   };
   return String(n).split('').map(d => map[d] ?? d).join('');
 }
+
+/**
+ * 乐谱音轨：按音高从低到高排序（1 2 3 4 5 6 7 高音1 …），
+ * 而不是按键在网格里的物理位置顺序。滑键模式中立区不发声，不占音轨。
+ */
+export function getLanes(mode: 'normal' | 'slide'): {
+  index: number;
+  label: string;
+  dot?: boolean;
+}[] {
+  return getKeyConfig(mode)
+    .filter(k => k.pitch !== null)
+    .sort((a, b) => comparePitch(a.pitch!, b.pitch!))
+    .map(k => ({ index: k.index, label: k.label, dot: k.dot }));
+}

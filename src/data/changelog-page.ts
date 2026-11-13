@@ -11,6 +11,21 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '8',
+    version: 'v2.2.4',
+    date: '2026-11-13',
+    items: [
+      {
+        type: 'fix',
+        text: '滑键模式的音轨顺序改为按音高排列：1 2 3 4 5 6 7 高音 1，不再是按键在网格里的物理顺序（原来排成 1 2 3 高音1 4 7 6 5）。',
+      },
+      {
+        type: 'adjust',
+        text: '按键整体放大：按键之间的间距由 20px 加到 24px，同时按键宽度由约 74px 增到约 91px，划奏时更好分开，也不会因为留白而显得突兀。',
+      },
+    ],
+  },
+  {
     id: '7',
     version: 'v2.2.3',
     date: '2026-11-13',

@@ -120,7 +120,7 @@ function Keypad({
   return (
     <div
       ref={gridRef}
-      className="grid grid-cols-3 gap-5 sm:gap-6 touch-none select-none w-full max-w-[344px] mx-auto"
+      className="grid grid-cols-3 gap-6 sm:gap-7 touch-none select-none w-full max-w-[420px] mx-auto"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

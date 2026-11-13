@@ -7,7 +7,7 @@ import MusicStaff, { NoteBarData, LaneInfo, getAmberColor } from '@/components/M
 import VolumeKnob from '@/components/VolumeKnob';
 import Keypad from '@/components/Keypad';
 import { pianoEngine } from '@/lib/audio-engine';
-import { getKeyConfig, getRangeDisplay } from '@/lib/key-config';
+import { getKeyConfig, getRangeDisplay, getLanes } from '@/lib/key-config';
 import { loadPrefs, savePrefs, type IMusicBoxPrefs } from '@/lib/prefs';
 
 export default function PlayPage() {
@@ -29,11 +29,11 @@ export default function PlayPage() {
   }, [prefs]);
 
   const keys = useMemo(() => getKeyConfig(prefs.mode), [prefs.mode]);
-  // 固定音轨：每个发声的按键固定占一条轨道，顺序与键位一致
-  // 正常模式 9 条（含高音 1、高音 2）；滑键模式中间中立区不发声，8 条
+  // 固定音轨：每个发声的按键固定占一条轨道，按音高从低到高排列
+  // 正常模式 9 条：1 2 3 4 5 6 7 高音1 高音2；滑键模式中立区不发声，8 条：1 2 3 4 5 6 7 高音1
   const lanes = useMemo<LaneInfo[]>(
-    () => keys.filter(k => k.pitch !== null).map(k => ({ index: k.index, label: k.label, dot: k.dot })),
-    [keys],
+    () => getLanes(prefs.mode).map(l => ({ ...l })),
+    [prefs.mode],
   );
   const range = useMemo(() => getRangeDisplay(prefs.octaveOffset, prefs.mode), [prefs.octaveOffset, prefs.mode]);
 
@@ -249,8 +249,8 @@ export default function PlayPage() {
       </div>
 
       {/* 主体区：左工具栏 + 中按键组 + 右空栏 */}
-      <div className="flex-1 w-full px-2 sm:px-4 pb-4 sm:pb-6 pt-2 flex items-start justify-center">
-        <div className="flex gap-3 sm:gap-5 w-full max-w-[420px]">
+      <div className="flex-1 w-full px-1 sm:px-4 pb-4 sm:pb-6 pt-2 flex items-start justify-center">
+        <div className="flex gap-2 sm:gap-4 w-full max-w-[460px]">
           {/* 左侧工具栏 */}
           <div className="flex-shrink-0 flex flex-col gap-2 pt-1">
             <button
@@ -327,7 +327,7 @@ export default function PlayPage() {
           </div>
 
           {/* 右侧空栏（保留位置） */}
-          <div className="flex-shrink-0 w-11 sm:w-14" />
+          <div className="flex-shrink-0 w-0 sm:w-14" />
         </div>
       </div>
 
