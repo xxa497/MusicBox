@@ -8,6 +8,8 @@ export interface NoteBarData {
   endTime: number | null;
   /** 所在音轨：等于按键索引（0-8），每条音轨固定对应一个按键 */
   lane: number;
+  /** 换音域时断出的后半段：顶部画一条接缝，与前半段区分 */
+  split?: boolean;
   /** 颜色 */
   color: string;
 }
@@ -107,6 +109,7 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
       const bw = barW;
       const bh = bottomY - topY;
       const r = Math.min(8, bw / 2, bh / 2);
+      const rTop = note.split ? 0 : r;
 
       // 琥珀色渐变填充（亮→主→深，沿长度方向）
       const barGrad = ctx.createLinearGradient(x, y, x, y + bh);
@@ -116,9 +119,9 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
 
       ctx.fillStyle = barGrad;
       ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.lineTo(x + bw - r, y);
-      ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
+      ctx.moveTo(x + rTop, y);
+      ctx.lineTo(x + bw - rTop, y);
+      if (rTop > 0) ctx.quadraticCurveTo(x + bw, y, x + bw, y + r);
       ctx.lineTo(x + bw, y + bh - r);
       ctx.quadraticCurveTo(x + bw, y + bh, x + bw - r, y + bh);
       ctx.lineTo(x + r, y + bh);

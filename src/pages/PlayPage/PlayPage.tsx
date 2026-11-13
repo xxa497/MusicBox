@@ -123,16 +123,63 @@ export default function PlayPage() {
     stopNote(index, pointerId);
   }, [stopNote]);
 
+  /**
+   * 换八度时处理按住中的音：
+   * 把正在按住的音符在当前时刻收尾，再在同一条音轨上开一段新的（split 标记），
+   * 两段紧贴在一起、中间画一条细接缝，所以看得出一条被断成了两段。
+   */
+  const splitHeldNotesForOctave = useCallback((newOffset: number) => {
+    const held = Array.from(pointerNoteMapRef.current.entries());
+    if (held.length === 0) return;
+
+    const now = performance.now();
+
+    // 老段收尾
+    setNotes(prev => prev.map(n => (n.endTime === null ? { ...n, endTime: now } : n)));
+
+    const segments: NoteBarData[] = [];
+    held.forEach(([pointerId, rec]) => {
+      const key = keys[rec.index];
+      if (!key?.pitch) return;
+
+      // 声音：停掉旧八度的音，按新八度重新发声，听感上不断
+      pianoEngine.noteOff(key.pitch);
+      pianoEngine.noteOn(key.pitch, newOffset);
+
+      const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
+      pointerNoteMapRef.current.set(pointerId, { noteId, index: rec.index, lane: rec.index });
+
+      segments.push({
+        id: noteId,
+        pitch: key.pitch,
+        label: key.label,
+        startTime: now,
+        endTime: null,
+        lane: rec.index,
+        split: true,
+        color: getAmberColor(key.pitch),
+      });
+    });
+
+    if (segments.length > 0) setNotes(prev => [...prev, ...segments]);
+  }, [keys]);
+
   // 八度切换
   const octaveUp = useCallback(() => {
-    setPrefs(p => ({ ...p, octaveOffset: Math.min(2, p.octaveOffset + 1) }));
+    const next = Math.min(2, prefs.octaveOffset + 1);
+    if (next === prefs.octaveOffset) return;
+    splitHeldNotesForOctave(next);
+    setPrefs(p => ({ ...p, octaveOffset: next }));
     toast.success('音域升高一个八度');
-  }, []);
+  }, [prefs.octaveOffset, splitHeldNotesForOctave]);
 
   const octaveDown = useCallback(() => {
-    setPrefs(p => ({ ...p, octaveOffset: Math.max(-2, p.octaveOffset - 1) }));
+    const next = Math.max(-2, prefs.octaveOffset - 1);
+    if (next === prefs.octaveOffset) return;
+    splitHeldNotesForOctave(next);
+    setPrefs(p => ({ ...p, octaveOffset: next }));
     toast.success('音域降低一个八度');
-  }, []);
+  }, [prefs.octaveOffset, splitHeldNotesForOctave]);
 
   // 模式切换
   const toggleMode = useCallback(() => {
@@ -255,7 +302,7 @@ export default function PlayPage() {
           <div className="flex-shrink-0 flex flex-col gap-2 pt-1">
             <button
               type="button"
-              onClick={octaveUp}
+              onPointerDown={(e) => { e.stopPropagation(); octaveUp(); }}
               className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm"
               style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
@@ -268,7 +315,7 @@ export default function PlayPage() {
             </button>
             <button
               type="button"
-              onClick={octaveDown}
+              onPointerDown={(e) => { e.stopPropagation(); octaveDown(); }}
               className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm"
               style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
@@ -281,7 +328,7 @@ export default function PlayPage() {
             </button>
             <button
               type="button"
-              onClick={toggleMode}
+              onPointerDown={(e) => { e.stopPropagation(); toggleMode(); }}
               className="size-11 rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
               style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
@@ -297,7 +344,7 @@ export default function PlayPage() {
             </button>
             <button
               type="button"
-              onClick={clearStaff}
+              onPointerDown={(e) => { e.stopPropagation(); if (!isPlaying) clearStaff(); }}
               disabled={isPlaying}
               className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm disabled:cursor-not-allowed"
               style={{
