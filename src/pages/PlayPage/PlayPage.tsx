@@ -3,7 +3,7 @@ import { Menu, Info, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import AppDrawer from '@/components/AppDrawer';
-import MusicStaff, { NoteBarData, getAmberColor } from '@/components/MusicStaff';
+import MusicStaff, { NoteBarData, LaneInfo, getAmberColor } from '@/components/MusicStaff';
 import VolumeKnob from '@/components/VolumeKnob';
 import Keypad from '@/components/Keypad';
 import { pianoEngine } from '@/lib/audio-engine';
@@ -20,9 +20,7 @@ export default function PlayPage() {
 
   // 每个 pointerId 对应的音符（按 pointer 独立跟踪，防止音泄漏）
   const pointerNoteMapRef = useRef<Map<number, { noteId: string; index: number; lane: number }>>(new Map());
-  // 当前乐谱使用的列数：只在需要时增加，保证已有音符的横向位置不跳动
-  const laneCountRef = useRef(1);
-  const [laneCount, setLaneCount] = useState(1);
+
 
   // 保存偏好 + 同步音量
   useEffect(() => {
@@ -31,6 +29,12 @@ export default function PlayPage() {
   }, [prefs]);
 
   const keys = useMemo(() => getKeyConfig(prefs.mode), [prefs.mode]);
+  // 固定音轨：每个发声的按键固定占一条轨道，顺序与键位一致
+  // 正常模式 9 条（含高音 1、高音 2）；滑键模式中间中立区不发声，8 条
+  const lanes = useMemo<LaneInfo[]>(
+    () => keys.filter(k => k.pitch !== null).map(k => ({ index: k.index, label: k.label, dot: k.dot })),
+    [keys],
+  );
   const range = useMemo(() => getRangeDisplay(prefs.octaveOffset, prefs.mode), [prefs.octaveOffset, prefs.mode]);
 
   // 清理已完全滚出屏幕的音符
@@ -47,10 +51,8 @@ export default function PlayPage() {
   /**
    * 触发一个音符开始
    *
-   * 分列规则：按「时间重叠」占列——当前仍按住（尚未松开）的音各自占一列，
-   * 新音落在第一个空列上。这样：
-   *  - 滑键模式两指同时按，会各占一列，不会再叠成一条
-   *  - 长按一个键期间再按别的键，新音另起一列，不会叠在长条上
+   * 每个按键固定对应一条音轨（lane = 按键索引），音符的横向位置永远不变：
+   * 第一下按在哪儿，后续同音的条就出现在哪儿，不会因为按了别的键而漂到边上。
    */
   const startNote = useCallback((index: number, pointerId: number) => {
     const key = keys[index];
@@ -59,22 +61,8 @@ export default function PlayPage() {
     const now = performance.now();
     const pitch = key.pitch;
 
-    // 已占用列（仍按住、尚未松开的音）
-    const lanesInUse = new Set<number>();
-    pointerNoteMapRef.current.forEach(v => lanesInUse.add(v.lane));
-
-    let lane = 0;
-    while (lanesInUse.has(lane)) lane += 1;
-
-    // 列数只增不减：新音需要更多列时扩展，已有音位置保持
-    const nextLaneCount = Math.max(laneCountRef.current, lane + 1);
-    if (nextLaneCount !== laneCountRef.current) {
-      laneCountRef.current = nextLaneCount;
-      setLaneCount(nextLaneCount);
-    }
-
     const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
-    pointerNoteMapRef.current.set(pointerId, { noteId, index, lane });
+    pointerNoteMapRef.current.set(pointerId, { noteId, index, lane: index });
 
     const newNote: NoteBarData = {
       id: noteId,
@@ -82,7 +70,7 @@ export default function PlayPage() {
       label: key.label,
       startTime: now,
       endTime: null,
-      lane,
+      lane: index,
       color: getAmberColor(pitch),
     };
 
@@ -163,8 +151,6 @@ export default function PlayPage() {
     pianoEngine.allNotesOff();
     setActiveKeyIndices(new Set());
     pointerNoteMapRef.current.clear();
-    laneCountRef.current = 1;
-    setLaneCount(1);
     setNotes([]);
     toast.success('已清空乐谱');
   }, []);
@@ -221,7 +207,7 @@ export default function PlayPage() {
           className="w-full h-[180px] sm:h-[220px] md:h-[260px] rounded-xl border overflow-hidden"
           style={{ borderColor: '#332c25' }}
         >
-          <MusicStaff notes={notes} laneCount={laneCount} />
+          <MusicStaff notes={notes} lanes={lanes} />
         </div>
       </div>
 

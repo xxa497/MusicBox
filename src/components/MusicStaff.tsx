@@ -6,16 +6,25 @@ export interface NoteBarData {
   label: string;
   startTime: number;
   endTime: number | null;
-  /** 所在列（按时间重叠分配，0 起） */
+  /** 所在音轨：等于按键索引（0-8），每条音轨固定对应一个按键 */
   lane: number;
   /** 颜色 */
   color: string;
 }
 
+export interface LaneInfo {
+  /** 对应的按键索引 */
+  index: number;
+  /** 音轨标签（简谱数字） */
+  label: string;
+  /** 是否为高音（标签上方画点） */
+  dot?: boolean;
+}
+
 interface MusicStaffProps {
   notes: NoteBarData[];
-  /** 乐谱列数（由同时按住的最多音符数决定） */
-  laneCount: number;
+  /** 固定音轨列表：每条音轨固定一个按键，顺序即从左到右的位置 */
+  lanes: LaneInfo[];
   /** 瀑布流滚动速度 px/s */
   scrollSpeed?: number;
   /** 每毫秒对应多少像素的音符长度（按住时长→视觉长度） */
@@ -27,7 +36,7 @@ const AMBER_LIGHT = '#f5c894';
 const AMBER_MAIN = '#e8a86a';
 const AMBER_DEEP = '#c78a4d';
 
-function MusicStaff({ notes, laneCount, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProps) {
+function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
@@ -36,17 +45,33 @@ function MusicStaff({ notes, laneCount, scrollSpeed = 120, pxPerMs = 0.12 }: Mus
   const draw = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number) => {
     ctx.clearRect(0, 0, w, h);
 
-    const baselineY = h - 2; // 基准线在底部
+    const labelH = 20;              // 底部标签占位高度
+    const baselineY = h - labelH;   // 时间基准线（标签上方）
+    const marginX = 6;
+    const usableW = w - marginX * 2;
+    const totalCols = Math.max(lanes.length, 1);
+    const colW = usableW / totalCols;
+    const barW = Math.max(10, Math.min(28, colW * 0.6));
 
-    // 画基准线
-    ctx.strokeStyle = 'rgba(232, 168, 106, 0.3)';
+    // 音轨分隔竖线（很淡，用来指示每条音轨的范围）
+    ctx.strokeStyle = 'rgba(232, 168, 106, 0.10)';
     ctx.lineWidth = 1;
+    for (let i = 1; i < totalCols; i += 1) {
+      const x = marginX + i * colW;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, baselineY);
+      ctx.stroke();
+    }
+
+    // 时间基准线
+    ctx.strokeStyle = 'rgba(232, 168, 106, 0.35)';
     ctx.beginPath();
     ctx.moveTo(0, baselineY);
     ctx.lineTo(w, baselineY);
     ctx.stroke();
 
-    // 画顶部渐隐（深色主题：上暗下亮，顶部渐隐到深色背景）
+    // 顶部渐隐（深色主题：上暗下亮，顶部渐隐到深色背景）
     const fadeH = Math.min(h * 0.35, 100);
     const grad = ctx.createLinearGradient(0, 0, 0, fadeH);
     grad.addColorStop(0, 'rgba(20, 17, 15, 1)');
@@ -54,8 +79,14 @@ function MusicStaff({ notes, laneCount, scrollSpeed = 120, pxPerMs = 0.12 }: Mus
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, fadeH);
 
-    // 画音符条
+    // 画音符条：每条音轨固定 x 位置，位置不会随按键顺序变化
+    const lanePos = new Map<number, number>();
+    lanes.forEach((l, i) => lanePos.set(l.index, i));
+
     for (const note of notes) {
+      const pos = lanePos.get(note.lane);
+      if (pos === undefined) continue;
+
       const now = performance.now();
       const holdDuration = note.endTime ? note.endTime - note.startTime : now - note.startTime;
       const barHeight = Math.max(8, holdDuration * pxPerMs);
@@ -71,15 +102,7 @@ function MusicStaff({ notes, laneCount, scrollSpeed = 120, pxPerMs = 0.12 }: Mus
 
       if (bottomY < 0) continue;
 
-      // 分列计算 x 坐标与宽度（列数固定，音符不会因新音加入而横向跳动）
-      const totalCols = Math.max(laneCount, 1);
-      const marginX = 14;
-      const usableW = w - marginX * 2;
-      const colW = usableW / totalCols;
-      const barW = Math.max(16, Math.min(40, colW * 0.7));
-      const colX = marginX + note.lane * colW + (colW - barW) / 2;
-
-      const x = colX;
+      const x = marginX + pos * colW + (colW - barW) / 2;
       const y = topY;
       const bw = barW;
       const bh = bottomY - topY;
@@ -109,7 +132,26 @@ function MusicStaff({ notes, laneCount, scrollSpeed = 120, pxPerMs = 0.12 }: Mus
       ctx.fillStyle = 'rgba(255, 240, 210, 0.35)';
       ctx.fillRect(x + 2, y + 2, bw - 4, 3);
     }
-  }, [notes, laneCount, scrollSpeed, pxPerMs]);
+
+    // 底部音轨标签
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    lanes.forEach((lane, i) => {
+      const cx = marginX + i * colW + colW / 2;
+      const cy = baselineY + labelH / 2 + 1;
+      ctx.font = '500 10px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(154, 141, 125, 0.9)';
+      ctx.fillText(lane.label, cx, lane.dot ? cy + 3 : cy);
+
+      // 高音点：画在数字正上方
+      if (lane.dot) {
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(154, 141, 125, 0.9)';
+        ctx.arc(cx, cy - 5, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  }, [notes, lanes, scrollSpeed, pxPerMs]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

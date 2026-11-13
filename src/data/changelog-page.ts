@@ -11,6 +11,25 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '7',
+    version: 'v2.2.3',
+    date: '2026-11-13',
+    items: [
+      {
+        type: 'adjust',
+        text: '乐谱改为固定音轨：每个按键固定对应一条轨道，横向位置永不变化。先按哪个键，这个音就一直出现在它自己的轨道上，不会因为后面按了别的键而漂到边上。',
+      },
+      {
+        type: 'new',
+        text: '乐谱底部新增音轨标签。正常模式 9 条音轨，从左到右依次为 1 2 3 4 5 6 7 高音 1 高音 2；滑键模式中立区不发声，因此为 8 条：1 2 3 高音 1 4 7 6 5。',
+      },
+      {
+        type: 'adjust',
+        text: '音轨之间加了很淡的分隔线，便于看清每条音轨的范围。',
+      },
+    ],
+  },
+  {
     id: '6',
     version: 'v2.2.2',
     date: '2026-11-13',
