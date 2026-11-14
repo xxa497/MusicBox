@@ -25,6 +25,10 @@ function Keypad({
   const gridRef = useRef<HTMLDivElement>(null);
   /** 停在过渡区超过这个时间就当作“想停下来”，切断当前音；只是划过则不断 */
   const TRANSITION_DWELL_MS = 220;
+  /** 手指滑出键盘后给 120ms 宽限：边界抖动又滑回同一键时不中断、不拆成两段 */
+  const LEAVE_GRACE_MS = 120;
+  const leaveTimerRef = useRef<Map<number, number>>(new Map());
+  const leaveKeyRef = useRef<Map<number, number>>(new Map());
   /** 每个 pointer 在过渡区里的驻留计时器 */
   const transitionTimerRef = useRef<Map<number, number>>(new Map());
   /** 每个 pointer 上一次的采样点与时间（用于预判速度和路径插值） */
@@ -73,25 +77,49 @@ function Keypad({
     }
   }, []);
 
+  const clearLeave = useCallback((pointerId: number) => {
+    const timer = leaveTimerRef.current.get(pointerId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      leaveTimerRef.current.delete(pointerId);
+    }
+    leaveKeyRef.current.delete(pointerId);
+  }, []);
+
   const releasePointer = useCallback((pointerId: number, source: 'release' | 'slide') => {
     clearDwell(pointerId);
+    // 如果手指刚好在「滑出键盘」的宽限期内抬起，要把挂起的那个音收掉，
+    // 否则它会一直响到下次再按同一个键
+    const pendingKey = leaveKeyRef.current.get(pointerId);
+    clearLeave(pointerId);
     lastPointRef.current.delete(pointerId);
     const idx = pointerKeyMapRef.current.get(pointerId);
     if (idx !== undefined && idx !== GAP) {
       onKeyUp?.(idx, pointerId, source);
+    } else if (pendingKey !== undefined && pendingKey !== GAP && keys[pendingKey]?.pitch) {
+      onKeyUp?.(pendingKey, pointerId, 'release');
     }
     pointerKeyMapRef.current.delete(pointerId);
-  }, [onKeyUp, clearDwell]);
+  }, [onKeyUp, clearDwell, clearLeave, keys]);
 
   /** 开始按下一个指针（触摸用 identifier，鼠标用固定 id） */
   const beginAt = useCallback((clientX: number, clientY: number, pid: number) => {
     const idx = getKeyFromPoint(clientX, clientY);
-    if (idx === null) return;
+    if (idx === null) {
+      // 从键盘外的空白处按下：也登记这个手指（状态记为空档），
+      // 这样之后滑进任意按键就能正常发声。落在按钮等控件上则不参与演奏。
+      const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+      if (el && el.closest('button, a, [role="button"], input, select, textarea')) return;
+      clearLeave(pid);
+      pointerKeyMapRef.current.set(pid, GAP);
+      lastPointRef.current.set(pid, { x: clientX, y: clientY, t: performance.now() });
+      return;
+    }
     if (pointerKeyMapRef.current.has(pid)) releasePointer(pid, 'release');
     pointerKeyMapRef.current.set(pid, idx);
     lastPointRef.current.set(pid, { x: clientX, y: clientY, t: performance.now() });
     if (idx !== GAP) onKeyDown?.(idx, pid, 'press');
-  }, [getKeyFromPoint, onKeyDown, releasePointer]);
+  }, [getKeyFromPoint, onKeyDown, releasePointer, clearLeave]);
 
   /**
    * 处理一个采样点。滑键模式下：
@@ -108,10 +136,21 @@ function Keypad({
 
     if (idx === null) {
       clearDwell(pointerId);
-      // 离开整个键盘（空白处）：停音，但保留这个手指的跟踪记录，
-      // 手指没离开时滑回任意按键上方都能立刻重新发声
+      // 离开整个键盘（空白处）：保留手指跟踪，并给 120ms 宽限再停音。
+      // 手指只是在边界抖了一下又滑回同一个键时，音不断、也不会拆成两段。
       if (prev !== undefined && prev !== GAP && prev >= 0 && keys[prev]?.pitch) {
-        onKeyUp?.(prev, pointerId, 'slide');
+        leaveKeyRef.current.set(pointerId, prev);
+        if (!leaveTimerRef.current.has(pointerId)) {
+          const timer = window.setTimeout(() => {
+            leaveTimerRef.current.delete(pointerId);
+            const key = leaveKeyRef.current.get(pointerId);
+            leaveKeyRef.current.delete(pointerId);
+            if (key !== undefined && pointerKeyMapRef.current.get(pointerId) === GAP) {
+              onKeyUp?.(key, pointerId, 'slide');
+            }
+          }, LEAVE_GRACE_MS);
+          leaveTimerRef.current.set(pointerId, timer);
+        }
       }
       pointerKeyMapRef.current.set(pointerId, GAP);
       return;
@@ -143,6 +182,21 @@ function Keypad({
 
     // 落在有音高的键上：取消过渡区的驻留计时
     clearDwell(pointerId);
+
+    // 从空白处滑回来：宽限内回到同一个键，视为没有离开，继续这个音
+    const pendingLeave = leaveKeyRef.current.get(pointerId);
+    if (pendingLeave !== undefined) {
+      clearLeave(pointerId);
+      if (pendingLeave === idx) {
+        pointerKeyMapRef.current.set(pointerId, idx);
+        lastPointRef.current.set(pointerId, { x, y, t: performance.now() });
+        return;
+      }
+      if (pendingLeave !== GAP && keys[pendingLeave]?.pitch) {
+        onKeyUp?.(pendingLeave, pointerId, 'slide');
+      }
+    }
+
     if (prev === undefined) return;
     if (prev === idx) return;
 
@@ -151,7 +205,7 @@ function Keypad({
     }
     pointerKeyMapRef.current.set(pointerId, idx);
     onKeyDown?.(idx, pointerId, 'slide', weak);
-  }, [getKeyFromPoint, keys, onKeyDown, onKeyUp, slideMode, clearDwell]);
+  }, [getKeyFromPoint, keys, onKeyDown, onKeyUp, slideMode, clearDwell, clearLeave]);
 
   const moveTo = useCallback((clientX: number, clientY: number, pointerId: number) => {
     if (!pointerKeyMapRef.current.has(pointerId)) return;
@@ -167,8 +221,10 @@ function Keypad({
     const speed = Math.hypot(totalDx, totalDy) / dt * 1000; // px/s
 
     // 路径插值：把上一次点到这一次点之间按 5px 采样，补齐掠过的键
+    // 但从键盘外（空白处）滑进来时不插值，只在落点判一次，避免第一下补音被当成两次判定
+    const startedOutside = getKeyFromPoint(startX, startY) === null;
     const dist = Math.hypot(totalDx, totalDy);
-    const steps = Math.min(48, Math.max(1, Math.round(dist / 5)));
+    const steps = startedOutside ? 1 : Math.min(48, Math.max(1, Math.round(dist / 5)));
     const weakForPass = steps > 2;
 
     for (let i = 1; i <= steps; i += 1) {
@@ -217,12 +273,9 @@ function Keypad({
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
-      // 与其他手势隔离：只处理落在键盘上的触点
       for (let i = 0; i < e.changedTouches.length; i += 1) {
         const t = e.changedTouches[i];
-        const idx = getKeyFromPoint(t.clientX, t.clientY);
-        if (idx === null) continue;
-        e.preventDefault();
+        if (getKeyFromPoint(t.clientX, t.clientY) !== null) e.preventDefault();
         beginRef.current(t.clientX, t.clientY, t.identifier);
       }
     };
@@ -247,16 +300,18 @@ function Keypad({
       }
     };
 
+    // 只服务真正的鼠标：触摸（含部分 WebView 报空 pointerType 的情况）一律走 Touch Events，
+    // 两套同时生效会让同一根手指产生两路跟踪、音符叠加
     const onPointerDown = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return; // 触摸交给上面
+      if (e.pointerType !== 'mouse') return;
       beginRef.current(e.clientX, e.clientY, MOUSE_ID);
     };
     const onPointerMove = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return;
+      if (e.pointerType !== 'mouse') return;
       moveRef.current(e.clientX, e.clientY, MOUSE_ID);
     };
     const onPointerUp = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return;
+      if (e.pointerType !== 'mouse') return;
       releaseRef.current(MOUSE_ID, 'release');
     };
 

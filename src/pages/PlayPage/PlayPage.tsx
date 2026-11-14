@@ -80,6 +80,14 @@ export default function PlayPage() {
     const now = performance.now();
     const pitch = key.pitch;
 
+    // 防御：同一次按下如果残留一个没结束的音符，先把它收尾，避免旧条一直长、新条叠在上面
+    const stale = pointerNoteMapRef.current.get(pointerId);
+    if (stale) {
+      const staleKey = keys[stale.index];
+      if (staleKey?.pitch) pianoEngine.noteOff(staleKey.pitch, 0.08);
+      setNotes(prev => prev.map(n => (n.id === stale.noteId && n.endTime === null ? { ...n, endTime: now } : n)));
+    }
+
     const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
     pointerNoteMapRef.current.set(pointerId, { noteId, index, lane: index });
 

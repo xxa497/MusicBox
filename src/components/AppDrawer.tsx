@@ -44,7 +44,7 @@ function AppDrawer({ open, onOpenChange }: AppDrawerProps) {
                 Music Box
               </SheetTitle>
               <SheetDescription style={{ color: '#9a8d7d' }} className="text-xs mt-0.5">
-                v3.4.6
+                v3.4.7
               </SheetDescription>
             </div>
           </div>
