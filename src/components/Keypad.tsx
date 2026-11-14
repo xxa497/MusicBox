@@ -16,10 +16,17 @@ const GAP = -1;
 function Keypad({
   keys,
   activeKeyIndices,
+  slideMode = false,
   onKeyDown,
   onKeyUp,
 }: KeypadProps) {
   const gridRef = useRef<HTMLDivElement>(null);
+  /** 停在过渡区超过这个时间就当作“想停下来”，切断当前音；只是划过则不断 */
+  const TRANSITION_DWELL_MS = 220;
+  /** 每个 pointer 在过渡区里的驻留计时器 */
+  const transitionTimerRef = useRef<Map<number, number>>(new Map());
+  /** 每个 pointer 上一次的采样点与时间（用于预判速度和路径插值） */
+  const lastPointRef = useRef<Map<number, { x: number; y: number; t: number }>>(new Map());
   // 每个 pointer 当前所在按键索引（GAP 表示在缝隙里）
   const pointerKeyMapRef = useRef<Map<number, number>>(new Map());
 
@@ -67,40 +74,142 @@ function Keypad({
     } catch { /* ignore */ }
 
     pointerKeyMapRef.current.set(e.pointerId, idx);
+    lastPointRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
     if (idx !== GAP) onKeyDown?.(idx, e.pointerId, 'press');
   }, [getKeyFromPoint, onKeyDown]);
 
+  /**
+   * 处理一个采样点。滑键模式下：
+   *  - 缝隙与中立格是「过渡区」，不切断当前音；
+   *  - 快速划动时按路径补齐经过的键，中间掠过的键发弱音，落点发正常音；
+   *  - 静止在缝隙里但明显朝某个键移动时，提前一点触发，不用「划过去再划回来」。
+   */
+  const clearDwell = useCallback((pointerId: number) => {
+    const timer = transitionTimerRef.current.get(pointerId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      transitionTimerRef.current.delete(pointerId);
+    }
+  }, []);
+
+  const applyPoint = useCallback((x: number, y: number, pointerId: number, speed: number, weak: boolean) => {
+    const idx = getKeyFromPoint(x, y);
+    const prev = pointerKeyMapRef.current.get(pointerId);
+
+    // 在滑键模式里，某键没有音高（中立格）等同于过渡区
+    const isTransition = idx === GAP || (idx !== null && idx >= 0 && keys[idx]?.pitch === null);
+
+    if (idx === null) {
+      clearDwell(pointerId);
+      // 离开整个键盘：停音
+      if (prev !== undefined && prev !== GAP && prev >= 0 && keys[prev]?.pitch) {
+        onKeyUp?.(prev, pointerId, 'slide');
+      }
+      pointerKeyMapRef.current.delete(pointerId);
+      return;
+    }
+
+    if (isTransition) {
+      if (slideMode) {
+        // 过渡区（缝隙 / 中间中立格）：
+        // 只是划过 → 保持当前音不断；停下来驻留超过 220ms → 当作想收声，切断当前音
+        if (prev !== undefined) pointerKeyMapRef.current.set(pointerId, prev);
+        if (prev !== undefined && prev !== GAP && keys[prev]?.pitch && !transitionTimerRef.current.has(pointerId)) {
+          const timer = window.setTimeout(() => {
+            transitionTimerRef.current.delete(pointerId);
+            const cur = pointerKeyMapRef.current.get(pointerId);
+            if (cur !== undefined && cur !== GAP && keys[cur]?.pitch) {
+              onKeyUp?.(cur, pointerId, 'release');
+            }
+            pointerKeyMapRef.current.set(pointerId, GAP);
+          }, TRANSITION_DWELL_MS);
+          transitionTimerRef.current.set(pointerId, timer);
+        }
+        return;
+      }
+      // 正常模式：缝隙即空档，直接停音
+      if (prev !== undefined && prev !== GAP) onKeyUp?.(prev, pointerId, 'slide');
+      pointerKeyMapRef.current.set(pointerId, GAP);
+      return;
+    }
+
+    // 落在有音高的键上：取消过渡区的驻留计时
+    clearDwell(pointerId);
+    if (prev === undefined) return;
+    if (prev === idx) return;
+
+    if (prev !== GAP && keys[prev]?.pitch) {
+      onKeyUp?.(prev, pointerId, 'slide');
+    }
+    pointerKeyMapRef.current.set(pointerId, idx);
+    onKeyDown?.(idx, pointerId, 'slide', weak);
+  }, [getKeyFromPoint, keys, onKeyDown, onKeyUp, slideMode, clearDwell]);
+
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    // 只处理正在按下的 pointer
-    if (!pointerKeyMapRef.current.has(e.pointerId)) return;
+    const pointerId = e.pointerId;
+    if (!pointerKeyMapRef.current.has(pointerId)) return;
 
-    const idx = getKeyFromPoint(e.clientX, e.clientY);
-    const prev = pointerKeyMapRef.current.get(e.pointerId) ?? GAP;
-    const next = idx === null ? GAP : idx;
+    const now = performance.now();
+    const last = lastPointRef.current.get(pointerId);
+    const native = e.nativeEvent as PointerEvent & { getCoalescedEvents?: () => PointerEvent[] };
 
-    if (next === prev) return; // 没换键
-
-    const pid = e.pointerId;
-
-    // 离开旧键（旧标记是缝隙时无需停音）
-    if (prev !== GAP) {
-      onKeyUp?.(prev, pid, 'slide');
+    // 合并事件：浏览器在快速移动时会把中间点打包，取出来逐点处理，避免漏键
+    const rawPoints: Array<{ x: number; y: number }> = [];
+    if (typeof native.getCoalescedEvents === 'function') {
+      const coalesced = native.getCoalescedEvents();
+      coalesced.forEach((p) => rawPoints.push({ x: p.clientX, y: p.clientY }));
+    }
+    if (rawPoints.length === 0 || rawPoints[rawPoints.length - 1].x !== e.clientX) {
+      rawPoints.push({ x: e.clientX, y: e.clientY });
     }
 
-    // 始终保留跟踪，滑出缝隙 / 移出网格后仍能重新进入按键
-    pointerKeyMapRef.current.set(pid, next);
-    if (next !== GAP) {
-      onKeyDown?.(next, pid, 'slide');
+    const startX = last?.x ?? e.clientX;
+    const startY = last?.y ?? e.clientY;
+    const dt = last ? Math.max(1, now - last.t) : 16;
+    const totalDx = e.clientX - startX;
+    const totalDy = e.clientY - startY;
+    const speed = Math.hypot(totalDx, totalDy) / dt * 1000; // px/s
+
+    // 路径插值：把上一次点到这一次点之间按 5px 采样，补齐掠过的键
+    const dist = Math.hypot(totalDx, totalDy);
+    const steps = Math.min(48, Math.max(1, Math.round(dist / 5)));
+    const weakForPass = steps > 2;
+
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      applyPoint(startX + totalDx * t, startY + totalDy * t, pointerId, speed, weakForPass && i < steps);
     }
-  }, [getKeyFromPoint, onKeyDown, onKeyUp]);
+
+    // 预判：停在过渡区但明显朝某键快速移动时，提前判定落到该键上
+    if (slideMode) {
+      const cur = pointerKeyMapRef.current.get(pointerId);
+      const idxNow = getKeyFromPoint(e.clientX, e.clientY);
+      const inTransition = idxNow === GAP || idxNow === null;
+      if (inTransition && speed > 320) {
+        const lead = 34; // 提前量（毫秒）
+        const px = e.clientX + (totalDx / dt) * lead;
+        const py = e.clientY + (totalDy / dt) * lead;
+        const predicted = getKeyFromPoint(px, py);
+        if (predicted !== null && predicted !== GAP && keys[predicted]?.pitch && predicted !== cur) {
+          if (cur !== undefined && cur !== GAP && keys[cur]?.pitch) onKeyUp?.(cur, pointerId, 'slide');
+          pointerKeyMapRef.current.set(pointerId, predicted);
+          onKeyDown?.(predicted, pointerId, 'slide', false);
+        }
+      }
+    }
+
+    lastPointRef.current.set(pointerId, { x: e.clientX, y: e.clientY, t: now });
+  }, [applyPoint, getKeyFromPoint, keys, onKeyDown, onKeyUp, slideMode]);
 
   const releasePointer = useCallback((pointerId: number, source: 'release' | 'slide') => {
+    clearDwell(pointerId);
+    lastPointRef.current.delete(pointerId);
     const idx = pointerKeyMapRef.current.get(pointerId);
     if (idx !== undefined && idx !== GAP) {
       onKeyUp?.(idx, pointerId, source);
     }
     pointerKeyMapRef.current.delete(pointerId);
-  }, [onKeyUp]);
+  }, [onKeyUp, clearDwell]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     releasePointer(e.pointerId, 'release');

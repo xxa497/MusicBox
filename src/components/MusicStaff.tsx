@@ -29,6 +29,8 @@ export interface LaneInfo {
 
 interface MusicStaffProps {
   notes: NoteBarData[];
+  /** 音符条的最小可视高度（滑键模式下快速划出的音太短会看不见） */
+  minBarHeight?: number;
   /** 固定音轨列表：每条音轨固定一个按键，顺序即从左到右的位置 */
   lanes: LaneInfo[];
   /** 瀑布流滚动速度 px/s */
@@ -42,7 +44,7 @@ const AMBER_LIGHT = '#f5c894';
 const AMBER_MAIN = '#e8a86a';
 const AMBER_DEEP = '#c78a4d';
 
-function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicStaffProps) {
+function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12, minBarHeight = 8 }: MusicStaffProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
@@ -95,7 +97,7 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
 
       const now = performance.now();
       const holdDuration = note.endTime ? note.endTime - note.startTime : now - note.startTime;
-      const barHeight = Math.max(8, holdDuration * pxPerMs);
+      const barHeight = Math.max(minBarHeight, holdDuration * pxPerMs);
 
       let bottomY: number;
       if (note.endTime !== null) {
@@ -189,7 +191,7 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12 }: MusicSt
         ctx.fill();
       }
     });
-  }, [notes, lanes, scrollSpeed, pxPerMs]);
+  }, [notes, lanes, scrollSpeed, pxPerMs, minBarHeight]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

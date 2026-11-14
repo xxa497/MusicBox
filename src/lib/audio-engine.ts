@@ -22,12 +22,16 @@ interface ActiveNote {
   gain: GainNode;
   filter: BiquadFilterNode;
   pitch: string;
+  released: boolean;
 }
 
 export class PianoEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private activeNotes: Map<string, ActiveNote> = new Map();
+  /** 已松开但还在衰减、尚未停止的音（延音踏板用） */
+  private ringingNotes: Set<ActiveNote> = new Set();
+  private sustain: boolean = false;
   private volume: number = 0.7;
 
   private ensureContext(): AudioContext {
@@ -60,7 +64,46 @@ export class PianoEngine {
   /**
    * 触发一个音符的按下（Attack）
    */
-  noteOn(pitch: string, octaveOffset: number = 0, accidental: number = 0): void {
+  /** 延音踏板：开 / 关。关掉时把还在衰减的音快速收掉，不会一直响 */
+  setSustain(on: boolean): void {
+    this.sustain = on;
+    if (on || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.ringingNotes.forEach((note) => {
+      try {
+        note.gain.gain.cancelScheduledValues(now);
+        note.gain.gain.setValueAtTime(note.gain.gain.value, now);
+        note.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        note.osc1.stop(now + 0.16);
+        note.osc2.stop(now + 0.16);
+        note.osc3.stop(now + 0.16);
+      } catch { /* ignore */ }
+    });
+    this.ringingNotes.clear();
+  }
+
+  isSustainOn(): boolean {
+    return this.sustain;
+  }
+
+  /** 换档时的一点“咔哒”反馈，很轻，只在滑键换音时用 */
+  tick(strength: number = 0.05): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 2200;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(strength, now + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+    osc.connect(gain).connect(this.masterGain!);
+    osc.start(now);
+    osc.stop(now + 0.03);
+    setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch { /* ignore */ } }, 120);
+  }
+
+  noteOn(pitch: string, octaveOffset: number = 0, accidental: number = 0, gainScale: number = 1): void {
     const ctx = this.ensureContext();
     const noteKey = pitch;
     // 如果这个音已经在响，先停掉再重新触发（避免叠音失控）
@@ -111,11 +154,13 @@ export class PianoEngine {
 
     // ADSR - Attack
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.85, now + 0.008);
+    const peak = 0.85 * gainScale;
+    const hold = 0.45 * gainScale;
+    gain.gain.linearRampToValueAtTime(peak, now + 0.008);
     // Decay to sustain
-    gain.gain.exponentialRampToValueAtTime(0.45, now + 0.12);
+    gain.gain.exponentialRampToValueAtTime(Math.max(hold, 0.001), now + 0.12);
     // Sustain 阶段保持，等 noteOff
-    gain.gain.setValueAtTime(0.45, now + 0.12);
+    gain.gain.setValueAtTime(Math.max(hold, 0.001), now + 0.12);
 
     // 滤波器包络
     filter.frequency.setValueAtTime(4000 + freq * 2, now);
@@ -125,34 +170,42 @@ export class PianoEngine {
     osc2.start(now);
     osc3.start(now);
 
-    this.activeNotes.set(noteKey, { osc1, osc2, osc3, gain, filter, pitch });
+    this.activeNotes.set(noteKey, { osc1, osc2, osc3, gain, filter, pitch, released: false });
   }
 
   /**
    * 释放一个音符（Release）
    */
-  noteOff(pitch: string): void {
+  /**
+   * 释放一个音符
+   * @param releaseTime 衰减到无声所需的秒数（滑键换音很短、普通松开 0.6s、踩延音 ~1.2s）
+   */
+  noteOff(pitch: string, releaseTime: number = 0.6): void {
     const note = this.activeNotes.get(pitch);
     if (!note || !this.ctx) return;
 
     const now = this.ctx.currentTime;
     const { osc1, osc2, osc3, gain, filter } = note;
+    const rt = Math.max(0.02, releaseTime);
 
-    // Release
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + rt);
 
     filter.frequency.cancelScheduledValues(now);
     filter.frequency.setValueAtTime(filter.frequency.value, now);
-    filter.frequency.exponentialRampToValueAtTime(200, now + 0.5);
+    filter.frequency.exponentialRampToValueAtTime(200, now + Math.min(rt, 0.5));
 
-    // 0.7s 后停止振荡器并清理
-    osc1.stop(now + 0.7);
-    osc2.stop(now + 0.7);
-    osc3.stop(now + 0.7);
+    osc1.stop(now + rt + 0.08);
+    osc2.stop(now + rt + 0.08);
+    osc3.stop(now + rt + 0.08);
 
+    note.released = true;
     this.activeNotes.delete(pitch);
+    if (rt > 0.15) {
+      this.ringingNotes.add(note);
+      setTimeout(() => this.ringingNotes.delete(note), (rt + 0.15) * 1000);
+    }
 
     // 防泄漏：稍长时间后断开连接
     setTimeout(() => {

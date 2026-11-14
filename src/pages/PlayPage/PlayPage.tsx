@@ -18,6 +18,10 @@ export default function PlayPage() {
   const [notes, setNotes] = useState<NoteBarData[]>([]);
   const [activeKeyIndices, setActiveKeyIndices] = useState<Set<number>>(new Set());
 
+  // 延音踏板：状态 + ref（供音频回调读取最新值）
+  const [sustain, setSustain] = useState(prefs.sustain);
+  const sustainRef = useRef(prefs.sustain);
+
   // 每个 pointerId 对应的音符（按 pointer 独立跟踪，防止音泄漏）
   const pointerNoteMapRef = useRef<Map<number, { noteId: string; index: number; lane: number }>>(new Map());
 
@@ -27,6 +31,21 @@ export default function PlayPage() {
     savePrefs(prefs);
     pianoEngine.setVolume(prefs.volume);
   }, [prefs]);
+
+  // 延音踏板：同步到音频引擎（关掉时把还在衰减的音快速收掉）
+  useEffect(() => {
+    sustainRef.current = sustain;
+    pianoEngine.setSustain(sustain);
+  }, [sustain]);
+
+  const toggleSustain = useCallback(() => {
+    setSustain((prev) => {
+      const next = !prev;
+      setPrefs(p => ({ ...p, sustain: next }));
+      toast.success(next ? '延音已开启（踏板踩下）' : '延音已关闭');
+      return next;
+    });
+  }, []);
 
   const keys = useMemo(() => getKeyConfig(prefs.mode), [prefs.mode]);
   // 固定音轨：每个发声的按键固定占一条轨道，按音高从低到高排列
@@ -54,7 +73,7 @@ export default function PlayPage() {
    * 每个按键固定对应一条音轨（lane = 按键索引），音符的横向位置永远不变：
    * 第一下按在哪儿，后续同音的条就出现在哪儿，不会因为按了别的键而漂到边上。
    */
-  const startNote = useCallback((index: number, pointerId: number) => {
+  const startNote = useCallback((index: number, pointerId: number, weak: boolean = false) => {
     const key = keys[index];
     if (!key || key.pitch === null) return; // 中立区不发音
 
@@ -77,18 +96,18 @@ export default function PlayPage() {
 
     setNotes(prev => [...prev, newNote]);
     setActiveKeyIndices(prev => new Set(prev).add(index));
-    pianoEngine.noteOn(pitch, prefs.octaveOffset, prefs.accidental);
+    pianoEngine.noteOn(pitch, prefs.octaveOffset, prefs.accidental, weak ? 0.5 : 1);
   }, [keys, prefs.octaveOffset, prefs.accidental]);
 
   /**
    * 停止一个 pointer 对应的音（只停这一路）
    */
-  const stopNote = useCallback((index: number, pointerId: number) => {
+  const stopNote = useCallback((index: number, pointerId: number, source: 'release' | 'slide' = 'release') => {
     const tracking = pointerNoteMapRef.current.get(pointerId);
     if (!tracking) {
       // 没有跟踪记录也兜底停一下这个键的音（防御性）
       const key = keys[index];
-      if (key?.pitch) pianoEngine.noteOff(key.pitch);
+      if (key?.pitch) pianoEngine.noteOff(key.pitch, 0.6);
       setActiveKeyIndices(prev => {
         const next = new Set(prev);
         next.delete(index);
@@ -100,7 +119,13 @@ export default function PlayPage() {
     const { noteId, index: trackedIndex } = tracking;
     const key = keys[trackedIndex];
     if (key?.pitch) {
-      pianoEngine.noteOff(key.pitch);
+      // 滑键模式换音要干净利落（短衰减）；踩了延音就拖长但一定会衰减到停
+      const release = sustainRef.current
+        ? 1.2
+        : prefs.mode === 'slide' && source === 'slide'
+          ? 0.08
+          : 0.6;
+      pianoEngine.noteOff(key.pitch, release);
     }
 
     const now = performance.now();
@@ -112,17 +137,25 @@ export default function PlayPage() {
     });
 
     pointerNoteMapRef.current.delete(pointerId);
-  }, [keys]);
+  }, [keys, prefs.mode]);
 
-  const handleKeyDown = useCallback((index: number, pointerId: number, _source: 'press' | 'slide') => {
-    const key = keys[index];
-    if (!key || key.pitch === null) return;
-    startNote(index, pointerId);
-  }, [keys, startNote]);
+  const handleKeyDown = useCallback(
+    (index: number, pointerId: number, source: 'press' | 'slide', weak = false) => {
+      const key = keys[index];
+      if (!key || key.pitch === null) return;
+      // 滑键换档时给一点很轻的「咔哒」，强化档位感
+      if (source === 'slide' && prefs.mode === 'slide' && !weak) pianoEngine.tick(0.04);
+      startNote(index, pointerId, weak);
+    },
+    [keys, startNote, prefs.mode],
+  );
 
-  const handleKeyUp = useCallback((index: number, pointerId: number, _source: 'release' | 'slide') => {
-    stopNote(index, pointerId);
-  }, [stopNote]);
+  const handleKeyUp = useCallback(
+    (index: number, pointerId: number, source: 'release' | 'slide') => {
+      stopNote(index, pointerId, source);
+    },
+    [stopNote],
+  );
 
   /**
    * 换八度时处理按住中的音：
@@ -266,7 +299,7 @@ export default function PlayPage() {
           className="w-full h-[180px] sm:h-[220px] md:h-[260px] rounded-xl border overflow-hidden"
           style={{ borderColor: '#332c25' }}
         >
-          <MusicStaff notes={notes} lanes={lanes} />
+          <MusicStaff notes={notes} lanes={lanes} minBarHeight={prefs.mode === 'slide' ? 14 : 8} />
         </div>
       </div>
 
@@ -311,11 +344,11 @@ export default function PlayPage() {
       <div className="flex-1 w-full px-1 sm:px-4 pb-4 sm:pb-6 pt-2 flex items-start justify-center">
         <div className="flex gap-2 sm:gap-4 w-full max-w-[460px]">
           {/* 左侧工具栏 */}
-          <div className="flex-shrink-0 flex flex-col gap-1 pt-1">
+          <div className="flex-shrink-0 flex flex-col gap-1 pt-1 self-stretch">
             <button
               type="button"
               onPointerDown={(e) => { e.stopPropagation(); octaveUp(); }}
-              className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm"
+              className="w-11 flex-1 min-h-[32px] rounded-xl border flex items-center justify-center transition-colors shadow-sm"
               style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = '#221d19'; }}
@@ -328,7 +361,7 @@ export default function PlayPage() {
             <button
               type="button"
               onPointerDown={(e) => { e.stopPropagation(); octaveDown(); }}
-              className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm"
+              className="w-11 flex-1 min-h-[32px] rounded-xl border flex items-center justify-center transition-colors shadow-sm"
               style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = '#221d19'; }}
@@ -341,7 +374,7 @@ export default function PlayPage() {
             <button
               type="button"
               onPointerDown={(e) => { e.stopPropagation(); toggleMode(); }}
-              className="size-11 rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
+              className="w-11 flex-1 min-h-[32px] rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
               style={{ background: '#221d19', borderColor: '#332c25', color: '#f1e7d9' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#2d2620'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = '#221d19'; }}
@@ -358,7 +391,7 @@ export default function PlayPage() {
               type="button"
               onPointerDown={(e) => { e.stopPropagation(); if (!isPlaying) clearStaff(); }}
               disabled={isPlaying}
-              className="size-11 rounded-xl border flex items-center justify-center transition-colors shadow-sm disabled:cursor-not-allowed"
+              className="w-11 flex-1 min-h-[32px] rounded-xl border flex items-center justify-center transition-colors shadow-sm disabled:cursor-not-allowed"
               style={{
                 background: isPlaying ? '#1a1613' : '#221d19',
                 borderColor: '#332c25',
@@ -385,7 +418,7 @@ export default function PlayPage() {
                   key={btn.label}
                   type="button"
                   onPointerDown={(e) => { e.stopPropagation(); toggleAccidental(btn.value); }}
-                  className="size-11 rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
+                  className="w-11 flex-1 min-h-[32px] rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
                   style={{
                     background: active ? '#3a2c1e' : '#221d19',
                     borderColor: active ? '#e8a86a' : '#332c25',
@@ -404,6 +437,28 @@ export default function PlayPage() {
                 </button>
               );
             })}
+
+            {/* 延音踏板：踩下后松手的声音会自然衰减到停止 */}
+            <button
+              type="button"
+              onPointerDown={(e) => { e.stopPropagation(); toggleSustain(); }}
+              className="w-11 flex-1 min-h-[32px] rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
+              style={{
+                background: sustain ? '#3a2c1e' : '#221d19',
+                borderColor: sustain ? '#e8a86a' : '#332c25',
+                color: sustain ? '#f5c894' : '#9a8d7d',
+              }}
+              aria-label="延音"
+              aria-pressed={sustain}
+            >
+              <span className="text-[11px] font-medium leading-none">延音</span>
+              <span
+                className="text-[9px] leading-none mt-0.5"
+                style={{ color: sustain ? '#f5c894' : '#7d7266' }}
+              >
+                {sustain ? '开' : '关'}
+              </span>
+            </button>
           </div>
 
           {/* 中间按键组 */}
@@ -411,6 +466,7 @@ export default function PlayPage() {
             <Keypad
               keys={keys}
               activeKeyIndices={activeKeyIndices}
+              slideMode={prefs.mode === 'slide'}
               onKeyDown={handleKeyDown}
               onKeyUp={handleKeyUp}
             />
