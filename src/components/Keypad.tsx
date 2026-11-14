@@ -103,6 +103,7 @@ function Keypad({
   }, [onKeyUp, clearDwell, clearLeave, keys]);
 
   /** 开始按下一个指针（触摸用 identifier，鼠标用固定 id） */
+
   const beginAt = useCallback((clientX: number, clientY: number, pid: number) => {
     const idx = getKeyFromPoint(clientX, clientY);
     if (idx === null) {
@@ -336,7 +337,7 @@ function Keypad({
   return (
     <div
       ref={gridRef}
-      className="grid grid-cols-3 gap-6 sm:gap-7 touch-none select-none w-full max-w-[420px] mx-auto"
+      className="grid grid-cols-4 gap-2 sm:gap-3 touch-none select-none w-full max-w-[430px] mx-auto"
     >
       {keys.map((k) => {
         const isActive = activeKeyIndices.has(k.index);
@@ -349,18 +350,27 @@ function Keypad({
             aria-label={k.pitch ?? '中立区'}
             disabled={isNeutral}
             className={[
-              'aspect-square rounded-xl flex items-center justify-center text-2xl sm:text-3xl font-medium transition-all duration-75',
+              'aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-75',
               'border shadow-sm pointer-events-auto',
               isNeutral
                 ? 'bg-[#1a1613] border-[#332c25] text-[#5a4f42] cursor-default'
                 : isActive
                 ? 'bg-[#e8a86a] border-[#f5c894] text-[#2b241d] shadow-inner scale-[0.97]'
+                : k.accidental !== 0
+                ? 'bg-gradient-to-b from-[#d9c8ab] to-[#c4b192] border-[#b5a488] text-[#2b241d] active:scale-[0.97]'
                 : 'bg-gradient-to-b from-[#f7efe2] to-[#e9dcc7] border-[#d9ccb6] text-[#2b241d] active:scale-[0.97]',
             ].join(' ')}
             style={{ touchAction: 'none' }}
           >
             <span className="relative inline-flex items-center justify-center leading-none">
-              <span className="leading-none">{k.label}</span>
+              {k.accidental !== 0 ? (
+                <span className="inline-flex items-center gap-[2px] leading-none">
+                  <SharpMark size={13} color={isActive ? '#5a4230' : '#2b241d'} />
+                  <span className="text-base sm:text-lg font-semibold leading-none">{k.label.slice(1)}</span>
+                </span>
+              ) : (
+                <span className="leading-none text-2xl sm:text-3xl font-medium">{k.label}</span>
+              )}
               {/* 高音点：绝对定位在数字正上方，数字本身仍与其它键对齐 */}
               {k.dot && (
                 <span
@@ -380,10 +390,34 @@ function Keypad({
                 />
               )}
             </span>
+            {k.subLabel && (
+              <span
+                aria-hidden="true"
+                className="leading-none"
+                style={{ marginTop: 2, fontSize: 8, lineHeight: 1, color: isActive ? '#5a4230' : '#7a6a55' }}
+              >
+                {k.subLabel}
+              </span>
+            )}
           </button>
         );
       })}
     </div>
+  );
+}
+
+
+/** ♯ 用 SVG 画：WebView 里的字体常把 musical sharp 画成 # */
+function SharpMark({ size = 11, color = '#2b241d' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" aria-hidden="true" style={{ display: 'block' }}>
+      <g stroke={color} strokeWidth={1.5} strokeLinecap="butt" fill="none">
+        <line x1="5.2" y1="0.4" x2="2.2" y2="11.6" />
+        <line x1="9.4" y1="0.4" x2="6.4" y2="11.6" />
+        <line x1="0.4" y1="5.0" x2="11.6" y2="3.5" />
+        <line x1="0.4" y1="8.5" x2="11.6" y2="7.0" />
+      </g>
+    </svg>
   );
 }
 

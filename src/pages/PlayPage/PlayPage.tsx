@@ -24,8 +24,7 @@ export default function PlayPage() {
   const sustainRef = useRef(prefs.sustain);
 
   // 每个 pointerId 对应的音符（按 pointer 独立跟踪，防止音泄漏）
-  const pointerNoteMapRef = useRef<Map<number, { noteId: string; index: number; lane: number }>>(new Map());
-
+  const pointerNoteMapRef = useRef<Map<number, { noteId: string; index: number; lane: number; octave: number; accidental: 1 | -1 | 0 }>>(new Map());
 
   // 保存偏好 + 同步音量
   useEffect(() => {
@@ -111,8 +110,7 @@ export default function PlayPage() {
   }, []);
 
   const keys = useMemo(() => getKeyConfig(prefs.mode), [prefs.mode]);
-  // 固定音轨：每个发声的按键固定占一条轨道，按音高从低到高排列
-  // 正常模式 9 条：1 2 3 4 5 6 7 高音1 高音2；滑键模式中立区不发声，8 条：1 2 3 4 5 6 7 高音1
+  // 固定音轨：升/降音与它的还原音共用一条轨（条上标记号区分），所以只有 7 条：1 2 3 4 5 6 7
   const lanes = useMemo<LaneInfo[]>(
     () => getLanes(prefs.mode).map(l => ({ ...l })),
     [prefs.mode],
@@ -142,17 +140,20 @@ export default function PlayPage() {
 
     const now = performance.now();
     const pitch = key.pitch;
+    // 按键位置优先：靠上=♯、靠下=♭；中间区跟随工具栏记号
+    const accidental = key.accidental;
 
     // 防御：同一次按下如果残留一个没结束的音符，先把它收尾，避免旧条一直长、新条叠在上面
     const stale = pointerNoteMapRef.current.get(pointerId);
     if (stale) {
       const staleKey = keys[stale.index];
-      if (staleKey?.pitch) pianoEngine.noteOff(staleKey.pitch, 0.08);
+      if (staleKey?.pitch) pianoEngine.noteOff(staleKey.pitch, 0.08, stale.octave, stale.accidental);
       setNotes(prev => prev.map(n => (n.id === stale.noteId && n.endTime === null ? { ...n, endTime: now } : n)));
     }
 
     const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
-    pointerNoteMapRef.current.set(pointerId, { noteId, index, lane: index });
+    const octave = prefs.octaveOffset;
+    pointerNoteMapRef.current.set(pointerId, { noteId, index, lane: key.lane, octave, accidental });
 
     const newNote: NoteBarData = {
       id: noteId,
@@ -160,15 +161,16 @@ export default function PlayPage() {
       label: key.label,
       startTime: now,
       endTime: null,
-      lane: index,
+      lane: key.lane,
       color: getAmberColor(pitch),
-      accidental: prefs.accidental,
+      accidental,
     };
 
     setNotes(prev => [...prev, newNote]);
     setActiveKeyIndices(prev => new Set(prev).add(index));
-    pianoEngine.noteOn(pitch, prefs.octaveOffset, prefs.accidental, weak ? 0.5 : 1);
-  }, [keys, prefs.octaveOffset, prefs.accidental]);
+    pianoEngine.noteOn(pitch, octave, accidental, weak ? 0.5 : 1);
+
+  }, [keys, prefs.octaveOffset]);
 
   /**
    * 停止一个 pointer 对应的音（只停这一路）
@@ -178,7 +180,7 @@ export default function PlayPage() {
     if (!tracking) {
       // 没有跟踪记录也兜底停一下这个键的音（防御性）
       const key = keys[index];
-      if (key?.pitch) pianoEngine.noteOff(key.pitch, 0.6);
+      if (key?.pitch) pianoEngine.noteOff(key.pitch, 0.6, prefs.octaveOffset, key.accidental);
       setActiveKeyIndices(prev => {
         const next = new Set(prev);
         next.delete(index);
@@ -187,7 +189,7 @@ export default function PlayPage() {
       return;
     }
 
-    const { noteId, index: trackedIndex } = tracking;
+    const { noteId, index: trackedIndex, octave, accidental } = tracking;
     const key = keys[trackedIndex];
     if (key?.pitch) {
       // 滑键模式换音要干净利落（短衰减）；踩了延音就拖长但一定会衰减到停
@@ -196,7 +198,7 @@ export default function PlayPage() {
         : prefs.mode === 'slide' && source === 'slide'
           ? 0.08
           : 0.6;
-      pianoEngine.noteOff(key.pitch, release);
+      pianoEngine.noteOff(key.pitch, release, octave, accidental);
     }
 
     const now = performance.now();
@@ -208,7 +210,7 @@ export default function PlayPage() {
     });
 
     pointerNoteMapRef.current.delete(pointerId);
-  }, [keys, prefs.mode]);
+  }, [keys, prefs.mode, prefs.octaveOffset]);
 
   const handleKeyDown = useCallback(
     (index: number, pointerId: number, source: 'press' | 'slide', weak = false) => {
@@ -228,75 +230,21 @@ export default function PlayPage() {
     [stopNote],
   );
 
-  /**
-   * 换八度时处理按住中的音：
-   * 把正在按住的音符在当前时刻收尾，再在同一条音轨上开一段新的（split 标记），
-   * 两段紧贴在一起、中间画一条细接缝，所以看得出一条被断成了两段。
-   */
-  const splitHeldNotes = useCallback((next: { octaveOffset: number; accidental: 0 | 1 | -1 }) => {
-    const held = Array.from(pointerNoteMapRef.current.entries());
-    if (held.length === 0) return;
-
-    const now = performance.now();
-
-    // 老段收尾
-    setNotes(prev =>
-      prev.map(n => (n.endTime === null ? { ...n, endTime: now, splitTail: true } : n)),
-    );
-
-    const segments: NoteBarData[] = [];
-    held.forEach(([pointerId, rec]) => {
-      const key = keys[rec.index];
-      if (!key?.pitch) return;
-
-      // 声音：停掉旧八度的音，按新八度重新发声，听感上不断
-      pianoEngine.noteOff(key.pitch);
-      pianoEngine.noteOn(key.pitch, next.octaveOffset, next.accidental);
-
-      const noteId = `n${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${pointerId}`;
-      pointerNoteMapRef.current.set(pointerId, { noteId, index: rec.index, lane: rec.index });
-
-      segments.push({
-        id: noteId,
-        pitch: key.pitch,
-        label: key.label,
-        startTime: now,
-        endTime: null,
-        lane: rec.index,
-        split: true,
-        color: getAmberColor(key.pitch),
-        accidental: next.accidental,
-      });
-    });
-
-    if (segments.length > 0) setNotes(prev => [...prev, ...segments]);
-  }, [keys]);
-
-  // 八度切换
-  /** 升号 / 降号：同一个键再按一次回到还原 */
-  const toggleAccidental = useCallback((value: 1 | -1) => {
-    const next = prefs.accidental === value ? 0 : value;
-    // 记号只作用于「之后按下的音」：正在按住的音保持原音高继续响，
-    // 不重启、不叠第二下 attack（否则按住 6 时点 ♯ 会听到一次多余的 ♯6）。
-    setPrefs(p => ({ ...p, accidental: next }));
-    toast.success(next === 1 ? '升记号（♯）' : next === -1 ? '降记号（♭）' : '还原');
-  }, [prefs.accidental]);
-
+  // 八度切换：只改变之后按下的音的音域。已经按住的音不动——不会被掐掉再重放一次，
+  // 免得听起来像弹了两下；松手收尾时它还是按原来那个音高收。
   const octaveUp = useCallback(() => {
     const next = Math.min(2, prefs.octaveOffset + 1);
     if (next === prefs.octaveOffset) return;
-    splitHeldNotes({ octaveOffset: next, accidental: prefs.accidental });
     setPrefs(p => ({ ...p, octaveOffset: next }));
     toast.success('音域升高一个八度');
-  }, [prefs.octaveOffset, prefs.accidental, splitHeldNotes]);
+  }, [prefs.octaveOffset]);
 
   const octaveDown = useCallback(() => {
     const next = Math.max(-2, prefs.octaveOffset - 1);
     if (next === prefs.octaveOffset) return;
-    splitHeldNotes({ octaveOffset: next, accidental: prefs.accidental });
     setPrefs(p => ({ ...p, octaveOffset: next }));
     toast.success('音域降低一个八度');
-  }, [prefs.octaveOffset, prefs.accidental, splitHeldNotes]);
+  }, [prefs.octaveOffset]);
 
   // 模式切换
   const toggleMode = useCallback(() => {
@@ -507,37 +455,6 @@ export default function PlayPage() {
             >
               <Trash2 className="size-4" />
             </button>
-
-            {/* 升降记号：按一次生效，再按一次回到还原；演奏中按住琴键也能按 */}
-            {([
-              { value: 1 as const, glyph: '♯', label: '升记号', tip: '升' },
-              { value: -1 as const, glyph: '♭', label: '降记号', tip: '降' },
-            ]).map((btn) => {
-              const active = prefs.accidental === btn.value;
-              return (
-                <button
-                  key={btn.label}
-                  type="button"
-                  onPointerDown={(e) => { e.stopPropagation(); toggleAccidental(btn.value); }}
-                  className="w-11 flex-1 min-h-[32px] rounded-xl border flex flex-col items-center justify-center transition-colors shadow-sm"
-                  style={{
-                    background: active ? '#3a2c1e' : '#221d19',
-                    borderColor: active ? '#e8a86a' : '#332c25',
-                    color: active ? '#f5c894' : '#9a8d7d',
-                  }}
-                  aria-label={btn.label}
-                  aria-pressed={active}
-                >
-                  <span className="text-base leading-none">{btn.glyph}</span>
-                  <span
-                    className="text-[9px] leading-none mt-0.5"
-                    style={{ color: active ? '#f5c894' : '#7d7266' }}
-                  >
-                    {btn.tip}
-                  </span>
-                </button>
-              );
-            })}
 
             {/* 延音踏板：踩下后松手的声音会自然衰减到停止 */}
             <button

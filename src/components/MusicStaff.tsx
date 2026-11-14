@@ -152,11 +152,31 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12, minBarHei
         ctx.fillStyle = 'rgba(43, 36, 29, 0.92)';
         ctx.fill();
 
-        ctx.font = `600 ${Math.round(rBadge * 1.55)}px ui-sans-serif, system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
         ctx.fillStyle = '#f5c894';
-        ctx.fillText(glyph, cx, cy + 0.5);
+        if (note.accidental === 1) {
+          // ♯ 手画：部分系统字体把 musical sharp 显示成 #，画出来更稳
+          const h = rBadge * 1.5;
+          const w = rBadge * 1.5;
+          const x0 = cx - w / 2;
+          const y0 = cy - h / 2;
+          ctx.strokeStyle = '#f5c894';
+          ctx.lineWidth = Math.max(1, rBadge * 0.22);
+          ctx.beginPath();
+          ctx.moveTo(x0 + w * 0.38, y0);
+          ctx.lineTo(x0 + w * 0.22, y0 + h);
+          ctx.moveTo(x0 + w * 0.72, y0);
+          ctx.lineTo(x0 + w * 0.56, y0 + h);
+          ctx.moveTo(x0, y0 + h * 0.38);
+          ctx.lineTo(x0 + w, y0 + h * 0.28);
+          ctx.moveTo(x0, y0 + h * 0.74);
+          ctx.lineTo(x0 + w, y0 + h * 0.64);
+          ctx.stroke();
+        } else {
+          ctx.font = `600 ${Math.round(rBadge * 1.55)}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(glyph, cx, cy + 0.5);
+        }
         ctx.restore();
       }
 

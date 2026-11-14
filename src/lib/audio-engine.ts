@@ -394,12 +394,17 @@ export class PianoEngine {
     }, 700);
   }
 
+  /** 音符身份 = 音名 + 八度偏移 + 变音，三者任一不同就是两个不同的音（可以同时响） */
+  private makeKey(pitch: string, octaveOffset: number, accidental: number): string {
+    return `${pitch}|${octaveOffset}|${accidental}`;
+  }
+
   noteOn(pitch: string, octaveOffset: number = 0, accidental: number = 0, gainScale: number = 1): void {
     const ctx = this.ensureContext();
-    const noteKey = pitch;
-    // 如果这个音已经在响，先停掉再重新触发（避免叠音失控）
+    const noteKey = this.makeKey(pitch, octaveOffset, accidental);
+    // 同一个音（同音名、同八度、同变音）已经在响，先停掉再重新触发，避免叠音失控
     if (this.activeNotes.has(noteKey)) {
-      this.noteOff(pitch);
+      this.noteOff(pitch, 0.05, octaveOffset, accidental);
     }
 
     const def = getTimbre(this.timbre);
@@ -447,8 +452,9 @@ export class PianoEngine {
    * 释放一个音符
    * @param releaseTime 衰减到无声所需的秒数（滑键换音很短、普通松开 0.6s、踩延音 ~1.2s）
    */
-  noteOff(pitch: string, releaseTime: number = 0.6): void {
-    const note = this.activeNotes.get(pitch);
+  noteOff(pitch: string, releaseTime: number = 0.6, octaveOffset: number = 0, accidental: number = 0): void {
+    const noteKey = this.makeKey(pitch, octaveOffset, accidental);
+    const note = this.activeNotes.get(noteKey);
     if (!note || !this.ctx) return;
 
     const now = this.ctx.currentTime;
@@ -466,7 +472,7 @@ export class PianoEngine {
     oscs.forEach((o) => o.stop(now + rt + 0.08));
 
     note.released = true;
-    this.activeNotes.delete(pitch);
+    this.activeNotes.delete(noteKey);
     if (rt > 0.15) {
       this.ringingNotes.add(note);
       setTimeout(() => this.ringingNotes.delete(note), (rt + 0.15) * 1000);
@@ -486,13 +492,15 @@ export class PianoEngine {
    * 停止所有正在发声的音符
    */
   allNotesOff(): void {
-    for (const pitch of Array.from(this.activeNotes.keys())) {
-      this.noteOff(pitch);
+    for (const [key, note] of Array.from(this.activeNotes.entries())) {
+      const octaveOffset = Number(key.split('|')[1] ?? 0);
+      const accidental = Number(key.split('|')[2] ?? 0);
+      this.noteOff(note.pitch, 0.6, octaveOffset, accidental);
     }
   }
 
-  isNoteActive(pitch: string): boolean {
-    return this.activeNotes.has(pitch);
+  isNoteActive(pitch: string, octaveOffset: number = 0, accidental: number = 0): boolean {
+    return this.activeNotes.has(this.makeKey(pitch, octaveOffset, accidental));
   }
 
   getActiveCount(): number {
