@@ -1,4 +1,4 @@
-import { useCallback, useRef, memo } from 'react';
+import { useCallback, useRef, useEffect, memo } from 'react';
 import { KeyConfig } from '@/lib/key-config';
 
 interface KeypadProps {
@@ -12,6 +12,8 @@ interface KeypadProps {
 
 /** -1 表示手指在网格内但落在按键缝隙上（不发声，但仍保持跟踪） */
 const GAP = -1;
+/** 鼠标不走触摸 identifier，用固定 id 区分 */
+const MOUSE_ID = 100000;
 
 function Keypad({
   keys,
@@ -63,27 +65,6 @@ function Keypad({
     return GAP;
   }, []);
 
-  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const idx = getKeyFromPoint(e.clientX, e.clientY);
-    if (idx === null) return;
-
-    e.preventDefault();
-    const targetEl = e.currentTarget as HTMLElement;
-    try {
-      targetEl.setPointerCapture(e.pointerId);
-    } catch { /* ignore */ }
-
-    pointerKeyMapRef.current.set(e.pointerId, idx);
-    lastPointRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
-    if (idx !== GAP) onKeyDown?.(idx, e.pointerId, 'press');
-  }, [getKeyFromPoint, onKeyDown]);
-
-  /**
-   * 处理一个采样点。滑键模式下：
-   *  - 缝隙与中立格是「过渡区」，不切断当前音；
-   *  - 快速划动时按路径补齐经过的键，中间掠过的键发弱音，落点发正常音；
-   *  - 静止在缝隙里但明显朝某个键移动时，提前一点触发，不用「划过去再划回来」。
-   */
   const clearDwell = useCallback((pointerId: number) => {
     const timer = transitionTimerRef.current.get(pointerId);
     if (timer !== undefined) {
@@ -92,6 +73,32 @@ function Keypad({
     }
   }, []);
 
+  const releasePointer = useCallback((pointerId: number, source: 'release' | 'slide') => {
+    clearDwell(pointerId);
+    lastPointRef.current.delete(pointerId);
+    const idx = pointerKeyMapRef.current.get(pointerId);
+    if (idx !== undefined && idx !== GAP) {
+      onKeyUp?.(idx, pointerId, source);
+    }
+    pointerKeyMapRef.current.delete(pointerId);
+  }, [onKeyUp, clearDwell]);
+
+  /** 开始按下一个指针（触摸用 identifier，鼠标用固定 id） */
+  const beginAt = useCallback((clientX: number, clientY: number, pid: number) => {
+    const idx = getKeyFromPoint(clientX, clientY);
+    if (idx === null) return;
+    if (pointerKeyMapRef.current.has(pid)) releasePointer(pid, 'release');
+    pointerKeyMapRef.current.set(pid, idx);
+    lastPointRef.current.set(pid, { x: clientX, y: clientY, t: performance.now() });
+    if (idx !== GAP) onKeyDown?.(idx, pid, 'press');
+  }, [getKeyFromPoint, onKeyDown, releasePointer]);
+
+  /**
+   * 处理一个采样点。滑键模式下：
+   *  - 缝隙与中立格是「过渡区」，不切断当前音；
+   *  - 快速划动时按路径补齐经过的键，中间掠过的键发弱音，落点发正常音；
+   *  - 静止在缝隙里但明显朝某个键移动时，提前一点触发，不用「划过去再划回来」。
+   */
   const applyPoint = useCallback((x: number, y: number, pointerId: number, speed: number, weak: boolean) => {
     const idx = getKeyFromPoint(x, y);
     const prev = pointerKeyMapRef.current.get(pointerId);
@@ -101,11 +108,12 @@ function Keypad({
 
     if (idx === null) {
       clearDwell(pointerId);
-      // 离开整个键盘：停音
+      // 离开整个键盘（空白处）：停音，但保留这个手指的跟踪记录，
+      // 手指没离开时滑回任意按键上方都能立刻重新发声
       if (prev !== undefined && prev !== GAP && prev >= 0 && keys[prev]?.pitch) {
         onKeyUp?.(prev, pointerId, 'slide');
       }
-      pointerKeyMapRef.current.delete(pointerId);
+      pointerKeyMapRef.current.set(pointerId, GAP);
       return;
     }
 
@@ -145,29 +153,17 @@ function Keypad({
     onKeyDown?.(idx, pointerId, 'slide', weak);
   }, [getKeyFromPoint, keys, onKeyDown, onKeyUp, slideMode, clearDwell]);
 
-  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const pointerId = e.pointerId;
+  const moveTo = useCallback((clientX: number, clientY: number, pointerId: number) => {
     if (!pointerKeyMapRef.current.has(pointerId)) return;
 
     const now = performance.now();
     const last = lastPointRef.current.get(pointerId);
-    const native = e.nativeEvent as PointerEvent & { getCoalescedEvents?: () => PointerEvent[] };
 
-    // 合并事件：浏览器在快速移动时会把中间点打包，取出来逐点处理，避免漏键
-    const rawPoints: Array<{ x: number; y: number }> = [];
-    if (typeof native.getCoalescedEvents === 'function') {
-      const coalesced = native.getCoalescedEvents();
-      coalesced.forEach((p) => rawPoints.push({ x: p.clientX, y: p.clientY }));
-    }
-    if (rawPoints.length === 0 || rawPoints[rawPoints.length - 1].x !== e.clientX) {
-      rawPoints.push({ x: e.clientX, y: e.clientY });
-    }
-
-    const startX = last?.x ?? e.clientX;
-    const startY = last?.y ?? e.clientY;
+    const startX = last?.x ?? clientX;
+    const startY = last?.y ?? clientY;
     const dt = last ? Math.max(1, now - last.t) : 16;
-    const totalDx = e.clientX - startX;
-    const totalDy = e.clientY - startY;
+    const totalDx = clientX - startX;
+    const totalDy = clientY - startY;
     const speed = Math.hypot(totalDx, totalDy) / dt * 1000; // px/s
 
     // 路径插值：把上一次点到这一次点之间按 5px 采样，补齐掠过的键
@@ -183,12 +179,12 @@ function Keypad({
     // 预判：停在过渡区但明显朝某键快速移动时，提前判定落到该键上
     if (slideMode) {
       const cur = pointerKeyMapRef.current.get(pointerId);
-      const idxNow = getKeyFromPoint(e.clientX, e.clientY);
+      const idxNow = getKeyFromPoint(clientX, clientY);
       const inTransition = idxNow === GAP || idxNow === null;
-      if (inTransition && speed > 320) {
+      if (inTransition && speed > 320 && dt > 0) {
         const lead = 34; // 提前量（毫秒）
-        const px = e.clientX + (totalDx / dt) * lead;
-        const py = e.clientY + (totalDy / dt) * lead;
+        const px = clientX + (totalDx / dt) * lead;
+        const py = clientY + (totalDy / dt) * lead;
         const predicted = getKeyFromPoint(px, py);
         if (predicted !== null && predicted !== GAP && keys[predicted]?.pitch && predicted !== cur) {
           if (cur !== undefined && cur !== GAP && keys[cur]?.pitch) onKeyUp?.(cur, pointerId, 'slide');
@@ -198,43 +194,94 @@ function Keypad({
       }
     }
 
-    lastPointRef.current.set(pointerId, { x: e.clientX, y: e.clientY, t: now });
+    lastPointRef.current.set(pointerId, { x: clientX, y: clientY, t: now });
   }, [applyPoint, getKeyFromPoint, keys, onKeyDown, onKeyUp, slideMode]);
 
-  const releasePointer = useCallback((pointerId: number, source: 'release' | 'slide') => {
-    clearDwell(pointerId);
-    lastPointRef.current.delete(pointerId);
-    const idx = pointerKeyMapRef.current.get(pointerId);
-    if (idx !== undefined && idx !== GAP) {
-      onKeyUp?.(idx, pointerId, source);
-    }
-    pointerKeyMapRef.current.delete(pointerId);
-  }, [onKeyUp, clearDwell]);
+  // 触摸走 Touch Events（按 identifier 跟踪，Android / WebView 上多指最可靠）；
+  // 鼠标走 Pointer Events。两套互不干扰，避免多指同时按下时被系统的指针分发掐掉。
+  const moveRef = useRef(moveTo);
+  moveRef.current = moveTo;
+  const releaseRef = useRef(releasePointer);
+  releaseRef.current = releasePointer;
+  const beginRef = useRef(beginAt);
+  beginRef.current = beginAt;
 
-  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    releasePointer(e.pointerId, 'release');
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch { /* ignore */ }
-  }, [releasePointer]);
+  /** 用当前仍在屏幕上的触点集合，清掉已经消失但没有收到 touchend 的手指（防卡音） */
+  const pruneLost = useCallback((live: TouchList) => {
+    const alive = new Set<number>();
+    for (let i = 0; i < live.length; i += 1) alive.add(live[i].identifier);
+    Array.from(pointerKeyMapRef.current.keys()).forEach((pid) => {
+      if (!alive.has(pid)) releaseRef.current(pid, 'release');
+    });
+  }, []);
 
-  const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    releasePointer(e.pointerId, 'release');
-  }, [releasePointer]);
+  useEffect(() => {
+    const onTouchStart = (e: TouchEvent) => {
+      // 与其他手势隔离：只处理落在键盘上的触点
+      for (let i = 0; i < e.changedTouches.length; i += 1) {
+        const t = e.changedTouches[i];
+        const idx = getKeyFromPoint(t.clientX, t.clientY);
+        if (idx === null) continue;
+        e.preventDefault();
+        beginRef.current(t.clientX, t.clientY, t.identifier);
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      let handled = false;
+      for (let i = 0; i < e.changedTouches.length; i += 1) {
+        const t = e.changedTouches[i];
+        if (pointerKeyMapRef.current.has(t.identifier)) handled = true;
+        moveRef.current(t.clientX, t.clientY, t.identifier);
+      }
+      if (handled) e.preventDefault();
+      if (pointerKeyMapRef.current.size > 0) pruneLost(e.touches);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i += 1) {
+        releaseRef.current(e.changedTouches[i].identifier, 'release');
+      }
+    };
+    const onTouchCancel = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i += 1) {
+        releaseRef.current(e.changedTouches[i].identifier, 'release');
+      }
+    };
 
-  const handleLostPointerCapture = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    releasePointer(e.pointerId, 'release');
-  }, [releasePointer]);
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return; // 触摸交给上面
+      beginRef.current(e.clientX, e.clientY, MOUSE_ID);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      moveRef.current(e.clientX, e.clientY, MOUSE_ID);
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      releaseRef.current(MOUSE_ID, 'release');
+    };
+
+    window.addEventListener('touchstart', onTouchStart, { passive: false });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('touchcancel', onTouchCancel);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchCancel);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+  }, [getKeyFromPoint]);
 
   return (
     <div
       ref={gridRef}
       className="grid grid-cols-3 gap-6 sm:gap-7 touch-none select-none w-full max-w-[420px] mx-auto"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerCancel}
-      onLostPointerCapture={handleLostPointerCapture}
     >
       {keys.map((k) => {
         const isActive = activeKeyIndices.has(k.index);

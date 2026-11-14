@@ -11,6 +11,21 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '13',
+    version: 'v3.4.6',
+    date: '2026-11-14',
+    items: [
+      {
+        type: 'fix',
+        text: '修正按住一个键滑出键盘区域（空白处）再滑回来时不触发的问题：滑出即停音，但只要手指没离开，滑回任意按键上方都会立刻发声，不用重新按下。',
+      },
+      {
+        type: 'fix',
+        text: '修正升降记号导致的重音：按住某个音时点 ♯ / ♭ 不再重启当前音符，记号只作用于之后按下的音，不会再冒出一下不需要的升/降音。',
+      },
+    ],
+  },
+  {
     id: '12',
     version: 'v3.3.6',
     date: '2026-11-14',

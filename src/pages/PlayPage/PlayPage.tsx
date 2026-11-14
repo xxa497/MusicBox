@@ -205,10 +205,11 @@ export default function PlayPage() {
   /** 升号 / 降号：同一个键再按一次回到还原 */
   const toggleAccidental = useCallback((value: 1 | -1) => {
     const next = prefs.accidental === value ? 0 : value;
-    splitHeldNotes({ octaveOffset: prefs.octaveOffset, accidental: next });
+    // 记号只作用于「之后按下的音」：正在按住的音保持原音高继续响，
+    // 不重启、不叠第二下 attack（否则按住 6 时点 ♯ 会听到一次多余的 ♯6）。
     setPrefs(p => ({ ...p, accidental: next }));
     toast.success(next === 1 ? '升记号（♯）' : next === -1 ? '降记号（♭）' : '还原');
-  }, [prefs.accidental, prefs.octaveOffset, splitHeldNotes]);
+  }, [prefs.accidental]);
 
   const octaveUp = useCallback(() => {
     const next = Math.min(2, prefs.octaveOffset + 1);
