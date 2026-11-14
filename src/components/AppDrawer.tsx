@@ -2,13 +2,16 @@ import { memo } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { BookOpen, ScrollText, Music } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { APP_VERSION, getTimbreLabel } from '@/lib/app-info';
 
 interface AppDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 当前音色名（跟随演奏页实时选择） */
+  timbreName?: string;
 }
 
-function AppDrawer({ open, onOpenChange }: AppDrawerProps) {
+function AppDrawer({ open, onOpenChange, timbreName }: AppDrawerProps) {
   const navigate = useNavigate();
 
   const handleGuide = () => {
@@ -44,7 +47,7 @@ function AppDrawer({ open, onOpenChange }: AppDrawerProps) {
                 Music Box
               </SheetTitle>
               <SheetDescription style={{ color: '#9a8d7d' }} className="text-xs mt-0.5">
-                v3.4.7
+                v{APP_VERSION}
               </SheetDescription>
             </div>
           </div>
@@ -82,7 +85,7 @@ function AppDrawer({ open, onOpenChange }: AppDrawerProps) {
         <div className="p-6 border-t" style={{ borderColor: '#332c25' }}>
           <div className="flex items-center gap-2 text-xs" style={{ color: '#9a8d7d' }}>
             <Music className="size-3.5" />
-            <span>音色：大钢琴</span>
+            <span>音色：{timbreName ?? getTimbreLabel()}</span>
           </div>
         </div>
       </SheetContent>

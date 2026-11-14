@@ -1,7 +1,6 @@
 /**
- * 简易钢琴音色合成器
- * 使用 Web Audio API 合成接近大钢琴的音色
- * 原理：多振荡器叠加 + ADSR 包络 + 低通滤波器
+ * 简易合成器音色引擎
+ * 使用 Web Audio API 合成，一种音色 = 一组泛音 + 包络 + 滤波
  */
 
 const NOTE_FREQ_MAP: Record<string, number> = {
@@ -15,10 +14,255 @@ const NOTE_FREQ_MAP: Record<string, number> = {
   'A6': 1760.00, 'B6': 1975.53,
 };
 
+/** 可选的音色 */
+export type TimbreId =
+  | 'piano' | 'marimba' | 'musicbox' | 'bell' | 'strings' | 'organ' | 'flute'
+  | 'chip' | 'saw' | 'lead' | 'bass' | 'eguitar' | 'dist';
+
+interface Partial {
+  /** 相对基频的倍数 */
+  ratio: number;
+  type: OscillatorType;
+  /** 混合权重 */
+  gain: number;
+}
+
+export interface TimbreDef {
+  id: TimbreId;
+  /** 列表里显示的名字 */
+  name: string;
+  /** 一句话说明 */
+  hint: string;
+  partials: Partial[];
+  /** 起振时间（秒） */
+  attack: number;
+  /** 从峰值衰减到 sustain 的时间（秒） */
+  decay: number;
+  /** sustain 相对峰值的比例（0~1），越小越“一击即散” */
+  sustainLevel: number;
+  filterStart: (freq: number) => number;
+  filterEnd: (freq: number) => number;
+  /** 滤波 Q 值 */
+  q: number;
+}
+
+export const TIMBRES: TimbreDef[] = [
+  {
+    id: 'piano',
+    name: '钢琴',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'triangle', gain: 0.6 },
+      { ratio: 2, type: 'sine', gain: 0.25 },
+      { ratio: 3, type: 'sine', gain: 0.08 },
+    ],
+    attack: 0.008,
+    decay: 0.12,
+    sustainLevel: 0.53,
+    filterStart: (f) => 4000 + f * 2,
+    filterEnd: (f) => 2000 + f,
+    q: 0.8,
+  },
+  {
+    id: 'marimba',
+    name: '木琴',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sine', gain: 0.62 },
+      { ratio: 2, type: 'sine', gain: 0.18 },
+      { ratio: 4.2, type: 'sine', gain: 0.1 },
+    ],
+    attack: 0.003,
+    decay: 0.06,
+    sustainLevel: 0.05,
+    filterStart: (f) => 4200 + f * 2,
+    filterEnd: (f) => 1500 + f,
+    q: 0.7,
+  },
+  {
+    id: 'musicbox',
+    name: '八音盒',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sine', gain: 0.4 },
+      { ratio: 2, type: 'triangle', gain: 0.26 },
+      { ratio: 3.01, type: 'sine', gain: 0.18 },
+    ],
+    attack: 0.005,
+    decay: 0.09,
+    sustainLevel: 0.16,
+    filterStart: (f) => 6000 + f * 2,
+    filterEnd: (f) => 3400 + f,
+    q: 1.4,
+  },
+  {
+    id: 'bell',
+    name: '钟声',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sine', gain: 0.42 },
+      { ratio: 2.76, type: 'sine', gain: 0.24 },
+      { ratio: 5.4, type: 'sine', gain: 0.16 },
+    ],
+    attack: 0.006,
+    decay: 0.18,
+    sustainLevel: 0.03,
+    filterStart: (f) => 7000 + f * 2,
+    filterEnd: (f) => 4200 + f,
+    q: 1.6,
+  },
+  {
+    id: 'strings',
+    name: '弦乐',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sawtooth', gain: 0.3 },
+      { ratio: 2, type: 'triangle', gain: 0.18 },
+      { ratio: 3, type: 'sine', gain: 0.1 },
+    ],
+    attack: 0.12,
+    decay: 0.15,
+    sustainLevel: 0.72,
+    filterStart: (f) => 3200 + f * 2,
+    filterEnd: (f) => 2400 + f,
+    q: 0.5,
+  },
+  {
+    id: 'organ',
+    name: '管风琴',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sawtooth', gain: 0.32 },
+      { ratio: 2, type: 'sine', gain: 0.3 },
+      { ratio: 3, type: 'sine', gain: 0.2 },
+      { ratio: 4, type: 'sine', gain: 0.1 },
+    ],
+    attack: 0.05,
+    decay: 0.06,
+    sustainLevel: 0.86,
+    filterStart: (f) => 3800 + f * 2,
+    filterEnd: (f) => 3400 + f,
+    q: 0.5,
+  },
+  {
+    id: 'flute',
+    name: '长笛',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sine', gain: 0.5 },
+      { ratio: 2, type: 'sine', gain: 0.08 },
+      { ratio: 3, type: 'sine', gain: 0.04 },
+    ],
+    attack: 0.07,
+    decay: 0.1,
+    sustainLevel: 0.75,
+    filterStart: (f) => 2600 + f * 2,
+    filterEnd: (f) => 2000 + f,
+    q: 0.4,
+  },
+  {
+    id: 'chip',
+    name: '方波',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'square', gain: 0.36 },
+      { ratio: 2, type: 'square', gain: 0.12 },
+    ],
+    attack: 0.005,
+    decay: 0.05,
+    sustainLevel: 0.4,
+    filterStart: (f) => 6000 + f * 2,
+    filterEnd: (f) => 3200 + f,
+    q: 0.6,
+  },
+  {
+    id: 'saw',
+    name: '锯齿波',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sawtooth', gain: 0.4 },
+      { ratio: 2, type: 'sawtooth', gain: 0.14 },
+    ],
+    attack: 0.005,
+    decay: 0.07,
+    sustainLevel: 0.6,
+    filterStart: (f) => f * 24,
+    filterEnd: (f) => f * 18,
+    q: 0.7,
+  },
+  {
+    id: 'lead',
+    name: '合成主音',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sawtooth', gain: 0.26 },
+      { ratio: 1.004, type: 'sawtooth', gain: 0.26 },
+      { ratio: 2, type: 'square', gain: 0.14 },
+    ],
+    attack: 0.025,
+    decay: 0.12,
+    sustainLevel: 0.7,
+    filterStart: (f) => f * 9,
+    filterEnd: (f) => f * 4.2,
+    q: 2.4,
+  },
+  {
+    id: 'bass',
+    name: '合成贝斯',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sine', gain: 0.5 },
+      { ratio: 0.5, type: 'sawtooth', gain: 0.26 },
+      { ratio: 2, type: 'triangle', gain: 0.1 },
+    ],
+    attack: 0.012,
+    decay: 0.09,
+    sustainLevel: 0.6,
+    filterStart: (f) => 1600 + f * 2,
+    filterEnd: (f) => 900 + f,
+    q: 1.4,
+  },
+  {
+    id: 'eguitar',
+    name: '电吉他',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sawtooth', gain: 0.3 },
+      { ratio: 2, type: 'square', gain: 0.14 },
+      { ratio: 4, type: 'sine', gain: 0.07 },
+    ],
+    attack: 0.002,
+    decay: 0.055,
+    sustainLevel: 0.38,
+    filterStart: (f) => f * 8,
+    filterEnd: (f) => f * 3,
+    q: 3.0,
+  },
+  {
+    id: 'dist',
+    name: '失真吉他',
+    hint: '',
+    partials: [
+      { ratio: 1, type: 'sawtooth', gain: 0.3 },
+      { ratio: 1.008, type: 'sawtooth', gain: 0.26 },
+      { ratio: 2, type: 'square', gain: 0.12 },
+      { ratio: 3, type: 'sawtooth', gain: 0.08 },
+    ],
+    attack: 0.003,
+    decay: 0.08,
+    sustainLevel: 0.58,
+    filterStart: (f) => f * 11,
+    filterEnd: (f) => f * 3.5,
+    q: 1.9,
+  },
+];
+
+export function getTimbre(id: TimbreId): TimbreDef {
+  return TIMBRES.find((t) => t.id === id) ?? TIMBRES[0];
+}
+
 interface ActiveNote {
-  osc1: OscillatorNode;
-  osc2: OscillatorNode;
-  osc3: OscillatorNode;
+  oscs: OscillatorNode[];
   gain: GainNode;
   filter: BiquadFilterNode;
   pitch: string;
@@ -33,6 +277,7 @@ export class PianoEngine {
   private ringingNotes: Set<ActiveNote> = new Set();
   private sustain: boolean = false;
   private volume: number = 0.7;
+  private timbre: TimbreId = 'piano';
 
   private ensureContext(): AudioContext {
     if (!this.ctx) {
@@ -55,15 +300,21 @@ export class PianoEngine {
     }
   }
 
+  /** 切换音色：只影响之后按下的音，正在响的音不会被切断 */
+  setTimbre(id: TimbreId): void {
+    this.timbre = id;
+  }
+
+  getTimbre(): TimbreId {
+    return this.timbre;
+  }
+
   getFrequency(pitch: string, octaveOffset: number, accidental: number = 0): number {
     const base = NOTE_FREQ_MAP[pitch];
     if (!base) return 440;
     return base * Math.pow(2, octaveOffset) * Math.pow(2, accidental / 12);
   }
 
-  /**
-   * 触发一个音符的按下（Attack）
-   */
   /** 延音踏板：开 / 关。关掉时把还在衰减的音快速收掉，不会一直响 */
   setSustain(on: boolean): void {
     this.sustain = on;
@@ -74,9 +325,7 @@ export class PianoEngine {
         note.gain.gain.cancelScheduledValues(now);
         note.gain.gain.setValueAtTime(note.gain.gain.value, now);
         note.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-        note.osc1.stop(now + 0.16);
-        note.osc2.stop(now + 0.16);
-        note.osc3.stop(now + 0.16);
+        note.oscs.forEach((osc) => osc.stop(now + 0.16));
       } catch { /* ignore */ }
     });
     this.ringingNotes.clear();
@@ -103,6 +352,48 @@ export class PianoEngine {
     setTimeout(() => { try { osc.disconnect(); gain.disconnect(); } catch { /* ignore */ } }, 120);
   }
 
+  /** 试听某个音色（不登记进 activeNotes，自己会收掉） */
+  previewTimbre(id: TimbreId, pitch: string = 'C4'): void {
+    const def = getTimbre(id);
+    const ctx = this.ensureContext();
+    const freq = NOTE_FREQ_MAP[pitch] ?? 261.63;
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = def.filterStart(freq);
+    filter.Q.value = def.q;
+    const oscs: OscillatorNode[] = [];
+    const mixGains: GainNode[] = [];
+    def.partials.forEach((p) => {
+      const osc = ctx.createOscillator();
+      osc.type = p.type;
+      osc.frequency.value = freq * p.ratio;
+      const mix = ctx.createGain();
+      mix.gain.value = p.gain;
+      osc.connect(mix).connect(gain);
+      oscs.push(osc);
+      mixGains.push(mix);
+    });
+    gain.connect(filter).connect(this.masterGain!);
+    const peak = 0.5;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(peak, now + def.attack);
+    gain.gain.exponentialRampToValueAtTime(Math.max(peak * def.sustainLevel, 0.001), now + def.attack + def.decay);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    filter.frequency.exponentialRampToValueAtTime(def.filterEnd(freq), now + Math.max(def.decay, 0.12));
+    oscs.forEach((o) => o.start(now));
+    oscs.forEach((o) => o.stop(now + 0.5));
+    setTimeout(() => {
+      try {
+        oscs.forEach((o) => o.disconnect());
+        mixGains.forEach((m) => m.disconnect());
+        gain.disconnect();
+        filter.disconnect();
+      } catch { /* ignore */ }
+    }, 700);
+  }
+
   noteOn(pitch: string, octaveOffset: number = 0, accidental: number = 0, gainScale: number = 1): void {
     const ctx = this.ensureContext();
     const noteKey = pitch;
@@ -111,71 +402,47 @@ export class PianoEngine {
       this.noteOff(pitch);
     }
 
+    const def = getTimbre(this.timbre);
     const freq = this.getFrequency(pitch, octaveOffset, accidental);
     const now = ctx.currentTime;
 
-    // 三个振荡器叠加模拟钢琴泛音
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const osc3 = ctx.createOscillator();
-
-    osc1.type = 'triangle';
-    osc2.type = 'sine';
-    osc3.type = 'sine';
-
-    osc1.frequency.value = freq;
-    osc2.frequency.value = freq * 2;   // 一个八度
-    osc3.frequency.value = freq * 3;   // 十二度 + 大三度近似
-
-    // 低通滤波器，模拟钢琴共鸣衰减
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 3000 + freq * 2;
-    filter.Q.value = 0.8;
+    filter.frequency.value = def.filterStart(freq);
+    filter.Q.value = def.q;
 
-    // 包络
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, now);
 
-    // 混合比例：基频强，泛音弱
-    const mix1 = ctx.createGain();
-    const mix2 = ctx.createGain();
-    const mix3 = ctx.createGain();
-    mix1.gain.value = 0.6;
-    mix2.gain.value = 0.25;
-    mix3.gain.value = 0.08;
-
-    osc1.connect(mix1).connect(gain);
-    osc2.connect(mix2).connect(gain);
-    osc3.connect(mix3).connect(gain);
+    const oscs: OscillatorNode[] = [];
+    def.partials.forEach((p) => {
+      const osc = ctx.createOscillator();
+      osc.type = p.type;
+      osc.frequency.value = freq * p.ratio;
+      const mix = ctx.createGain();
+      mix.gain.value = p.gain;
+      osc.connect(mix).connect(gain);
+      oscs.push(osc);
+    });
 
     gain.connect(filter);
     filter.connect(this.masterGain!);
 
-    // ADSR - Attack
-    gain.gain.setValueAtTime(0, now);
     const peak = 0.85 * gainScale;
-    const hold = 0.45 * gainScale;
-    gain.gain.linearRampToValueAtTime(peak, now + 0.008);
-    // Decay to sustain
-    gain.gain.exponentialRampToValueAtTime(Math.max(hold, 0.001), now + 0.12);
-    // Sustain 阶段保持，等 noteOff
-    gain.gain.setValueAtTime(Math.max(hold, 0.001), now + 0.12);
+    const hold = Math.max(peak * def.sustainLevel, 0.001);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(peak, now + def.attack);
+    gain.gain.exponentialRampToValueAtTime(hold, now + def.attack + def.decay);
+    gain.gain.setValueAtTime(hold, now + def.attack + def.decay);
 
-    // 滤波器包络
-    filter.frequency.setValueAtTime(4000 + freq * 2, now);
-    filter.frequency.exponentialRampToValueAtTime(2000 + freq, now + 0.15);
+    filter.frequency.setValueAtTime(def.filterStart(freq), now);
+    filter.frequency.exponentialRampToValueAtTime(def.filterEnd(freq), now + Math.max(def.decay, 0.12));
 
-    osc1.start(now);
-    osc2.start(now);
-    osc3.start(now);
+    oscs.forEach((o) => o.start(now));
 
-    this.activeNotes.set(noteKey, { osc1, osc2, osc3, gain, filter, pitch, released: false });
+    this.activeNotes.set(noteKey, { oscs, gain, filter, pitch, released: false });
   }
 
-  /**
-   * 释放一个音符（Release）
-   */
   /**
    * 释放一个音符
    * @param releaseTime 衰减到无声所需的秒数（滑键换音很短、普通松开 0.6s、踩延音 ~1.2s）
@@ -185,7 +452,7 @@ export class PianoEngine {
     if (!note || !this.ctx) return;
 
     const now = this.ctx.currentTime;
-    const { osc1, osc2, osc3, gain, filter } = note;
+    const { oscs, gain, filter } = note;
     const rt = Math.max(0.02, releaseTime);
 
     gain.gain.cancelScheduledValues(now);
@@ -196,9 +463,7 @@ export class PianoEngine {
     filter.frequency.setValueAtTime(filter.frequency.value, now);
     filter.frequency.exponentialRampToValueAtTime(200, now + Math.min(rt, 0.5));
 
-    osc1.stop(now + rt + 0.08);
-    osc2.stop(now + rt + 0.08);
-    osc3.stop(now + rt + 0.08);
+    oscs.forEach((o) => o.stop(now + rt + 0.08));
 
     note.released = true;
     this.activeNotes.delete(pitch);
@@ -210,9 +475,7 @@ export class PianoEngine {
     // 防泄漏：稍长时间后断开连接
     setTimeout(() => {
       try {
-        osc1.disconnect();
-        osc2.disconnect();
-        osc3.disconnect();
+        oscs.forEach((o) => o.disconnect());
         gain.disconnect();
         filter.disconnect();
       } catch { /* ignore */ }

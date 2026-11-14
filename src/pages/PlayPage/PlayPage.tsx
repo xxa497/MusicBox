@@ -6,7 +6,8 @@ import AppDrawer from '@/components/AppDrawer';
 import MusicStaff, { NoteBarData, LaneInfo, getAmberColor } from '@/components/MusicStaff';
 import VolumeKnob from '@/components/VolumeKnob';
 import Keypad from '@/components/Keypad';
-import { pianoEngine } from '@/lib/audio-engine';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import { pianoEngine, TIMBRES, getTimbre, type TimbreDef } from '@/lib/audio-engine';
 import { getKeyConfig, getRangeDisplay, getLanes } from '@/lib/key-config';
 import { loadPrefs, savePrefs, type IMusicBoxPrefs } from '@/lib/prefs';
 
@@ -37,6 +38,68 @@ export default function PlayPage() {
     sustainRef.current = sustain;
     pianoEngine.setSustain(sustain);
   }, [sustain]);
+
+  // 音色：同步到音频引擎（只影响之后按下的音，正在响的音不会被切断）
+  useEffect(() => {
+    pianoEngine.setTimbre(prefs.timbre);
+  }, [prefs.timbre]);
+
+  // 音色选择器：按住按钮 → 拖到目标音色 → 松手即选中
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerHover, setPickerHover] = useState(-1);
+  const [pickerTop, setPickerTop] = useState(220);
+
+  const openPicker = useCallback((e: ReactPointerEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setPickerTop(Math.max(8, Math.min(r.bottom + 8, window.innerHeight - 350)));
+    setPickerHover(-1);
+    setPickerOpen(true);
+  }, []);
+
+  const selectTimbre = useCallback((def: TimbreDef) => {
+    setPrefs(p => ({ ...p, timbre: def.id }));
+    pianoEngine.setTimbre(def.id);
+    toast.success('音色已换成「' + def.name + '」');
+  }, []);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const findIndex = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      const item = el?.closest('[data-timbre-index]') as HTMLElement | null;
+      const attr = item?.getAttribute('data-timbre-index');
+      return attr ? parseInt(attr, 10) : -1;
+    };
+    const onMove = (ev: PointerEvent) => setPickerHover(findIndex(ev.clientX, ev.clientY));
+    const onUp = (ev: PointerEvent) => {
+      const idx = findIndex(ev.clientX, ev.clientY);
+      if (idx >= 0 && TIMBRES[idx]) {
+        selectTimbre(TIMBRES[idx]);
+      } else {
+        // 只点了一下按钮没拖过去：提示一下正确手势
+        const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        if (el?.closest('button[aria-label="音色"]')) {
+          toast('按住不放，拖到想要的音色上再松手');
+        }
+      }
+      setPickerOpen(false);
+      setPickerHover(-1);
+    };
+    // 被系统手势打断时只关闭、不选中，避免误改
+    const onCancel = () => {
+      setPickerOpen(false);
+      setPickerHover(-1);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+    };
+  }, [pickerOpen, selectTimbre]);
 
   const toggleSustain = useCallback(() => {
     setSustain((prev) => {
@@ -265,8 +328,14 @@ export default function PlayPage() {
 
   return (
     <div
-      className="min-h-screen w-full flex flex-col"
-      style={{ background: '#14110f' }}
+      className="min-h-screen w-full flex flex-col select-none"
+      style={{
+        background: '#14110f',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
+      }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* 顶部栏 */}
       <header
@@ -343,6 +412,29 @@ export default function PlayPage() {
           <div className="flex-shrink-0 pl-1">
             <VolumeKnob value={prefs.volume} onChange={handleVolumeChange} size={54} theme="dark" />
           </div>
+
+          {/* 音色：按住不放 → 滑到想用的音色 → 松手即选中 */}
+          <button
+            type="button"
+            onPointerDown={(e) => { e.preventDefault(); openPicker(e); }}
+            onContextMenu={(e) => e.preventDefault()}
+            className="flex-shrink-0 px-3 py-1.5 border rounded-xl flex flex-col items-center justify-center transition-colors"
+            style={{
+              borderColor: '#e8a86a',
+              background: '#1a1613',
+              color: '#f1e7d9',
+              minWidth: 68,
+              touchAction: 'none',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
+            }}
+            aria-label="音色"
+            aria-haspopup="listbox"
+          >
+            <span className="text-sm font-semibold leading-tight whitespace-nowrap">{getTimbre(prefs.timbre).name}</span>
+            <span className="text-[10px] leading-tight mt-0.5" style={{ color: '#e8a86a' }}>音色</span>
+          </button>
 
           {/* 右侧留空 */}
           <div className="flex-1" />
@@ -486,8 +578,71 @@ export default function PlayPage() {
         </div>
       </div>
 
+      {/* 音色选择器浮层：按住拖到目标音色，松手选中（只有名字，两列排，不挡按键） */}
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-40"
+          style={{
+            background: 'rgba(8, 6, 4, 0.55)',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitTouchCallout: 'none',
+          }}
+        >
+          <div
+            className="absolute rounded-2xl border p-2 shadow-xl"
+            style={{
+              left: 12,
+              right: 12,
+              top: pickerTop,
+              borderColor: '#4a3c2e',
+              background: '#1a1613',
+              pointerEvents: 'auto',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
+            }}
+            onDragStart={(e) => e.preventDefault()}
+          >
+            <div className="px-1 pb-1.5 flex items-center justify-between">
+              <span className="text-[11px]" style={{ color: '#8f8175' }}>按住拖动，松手选中</span>
+              <span className="text-[11px]" style={{ color: '#e8a86a' }}>{getTimbre(prefs.timbre).name}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {TIMBRES.map((t, i) => {
+                const active = prefs.timbre === t.id;
+                const hovered = pickerHover === i;
+                return (
+                  <div
+                    key={t.id}
+                    data-timbre-index={i}
+                    className="rounded-xl flex items-center justify-center select-none"
+                    style={{
+                      minHeight: 46,
+                      background: hovered ? '#54381f' : active ? '#332619' : '#221d19',
+                      border: '1px solid ' + (hovered ? '#e8a86a' : '#332c25'),
+                      color: hovered ? '#ffe2bd' : active ? '#f5c894' : '#efe6da',
+                      fontSize: 14,
+                      fontWeight: 500,
+                      letterSpacing: '0.02em',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                      transition: 'background 70ms, color 70ms',
+                    }}
+                  >
+                    {t.name}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 抽屉 */}
-      <AppDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
+      <AppDrawer open={drawerOpen} onOpenChange={setDrawerOpen} timbreName={getTimbre(prefs.timbre).name} />
     </div>
   );
 }

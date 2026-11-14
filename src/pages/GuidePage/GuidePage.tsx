@@ -2,6 +2,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { MOCK_GUIDE_SECTIONS } from '@/data/guide-page';
 import { motion } from 'framer-motion';
+import { APP_VERSION, getTimbreLabel } from '@/lib/app-info';
 
 export default function GuidePage() {
   const navigate = useNavigate();
@@ -52,7 +53,7 @@ export default function GuidePage() {
           className="text-center text-xs pt-2 pb-6"
           style={{ color: '#6a5d50' }}
         >
-          Music Box v1.0.0 · 音色：大钢琴
+          Music Box v{APP_VERSION} · 音色：{getTimbreLabel()}
         </motion.div>
       </main>
     </div>

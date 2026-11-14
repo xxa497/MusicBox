@@ -1,4 +1,5 @@
 import { scopedStorage } from '@lark-apaas/client-toolkit-lite';
+import type { TimbreId } from '@/lib/audio-engine';
 
 const STORAGE_KEY = 'musicbox_prefs';
 
@@ -10,7 +11,14 @@ export interface IMusicBoxPrefs {
   accidental: 0 | 1 | -1;
   /** 延音踏板 */
   sustain: boolean;
+  /** 音色 */
+  timbre: TimbreId;
 }
+
+const TIMBRE_IDS: TimbreId[] = [
+  'piano', 'marimba', 'musicbox', 'bell', 'strings', 'organ', 'flute',
+  'chip', 'saw', 'lead', 'bass', 'eguitar', 'dist',
+];
 
 const DEFAULT_PREFS: IMusicBoxPrefs = {
   volume: 70,
@@ -18,6 +26,7 @@ const DEFAULT_PREFS: IMusicBoxPrefs = {
   mode: 'normal',
   accidental: 0,
   sustain: false,
+  timbre: 'piano',
 };
 
 export function loadPrefs(): IMusicBoxPrefs {
@@ -31,6 +40,7 @@ export function loadPrefs(): IMusicBoxPrefs {
       mode: parsed.mode === 'slide' ? 'slide' : 'normal',
       accidental: parsed.accidental === 1 || parsed.accidental === -1 ? parsed.accidental : 0,
       sustain: parsed.sustain === true,
+      timbre: TIMBRE_IDS.includes(parsed.timbre as TimbreId) ? (parsed.timbre as TimbreId) : DEFAULT_PREFS.timbre,
     };
   } catch {
     return { ...DEFAULT_PREFS };
