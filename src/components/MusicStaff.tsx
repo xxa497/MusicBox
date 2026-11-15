@@ -21,6 +21,8 @@ export interface NoteBarData {
 export interface LaneInfo {
   /** 对应的按键索引 */
   index: number;
+  /** 音轨编号（音符条上的 lane 用的就是它） */
+  lane: number;
   /** 音轨标签（简谱数字） */
   label: string;
   /** 是否为高音（标签上方画点） */
@@ -89,7 +91,8 @@ function MusicStaff({ notes, lanes, scrollSpeed = 120, pxPerMs = 0.12, minBarHei
 
     // 画音符条：每条音轨固定 x 位置，位置不会随按键顺序变化
     const lanePos = new Map<number, number>();
-    lanes.forEach((l, i) => lanePos.set(l.index, i));
+    // 按「音轨编号」找列：升/降音与还原音共用一条轨，编号一致才落在同一列
+    lanes.forEach((l, i) => lanePos.set(l.lane, i));
 
     for (const note of notes) {
       const pos = lanePos.get(note.lane);

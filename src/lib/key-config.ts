@@ -58,20 +58,20 @@ export const KEY_CONFIG_SLIDE: KeyConfig[] = [
   { index: 2, pitch: 'D4', accidental: 0, label: '2', lane: 1, laneLabel: '2' },
   { index: 3, pitch: 'D4', accidental: 1, label: '♯2', subLabel: '♭3', lane: 1, laneLabel: '♯2' },
   // 第 2 行：7 〔空〕 〔空〕 3
-  { index: 4, pitch: 'B4', accidental: 0, label: '7', lane: 2, laneLabel: '7' },
+  { index: 4, pitch: 'B4', accidental: 0, label: '7', lane: 6, laneLabel: '7' },
   { index: 5, pitch: null, accidental: 0, label: '', laneLabel: '', lane: -1 },
   { index: 6, pitch: null, accidental: 0, label: '', laneLabel: '', lane: -1 },
-  { index: 7, pitch: 'E4', accidental: 0, label: '3', lane: 3, laneLabel: '3' },
+  { index: 7, pitch: 'E4', accidental: 0, label: '3', lane: 2, laneLabel: '3' },
   // 第 3 行：♯6 〔空〕 〔空〕 4
-  { index: 8, pitch: 'A4', accidental: 1, label: '♯6', subLabel: '♭7', lane: 3, laneLabel: '♯6' },
+  { index: 8, pitch: 'A4', accidental: 1, label: '♯6', subLabel: '♭7', lane: 5, laneLabel: '♯6' },
   { index: 9, pitch: null, accidental: 0, label: '', laneLabel: '', lane: -1 },
   { index: 10, pitch: null, accidental: 0, label: '', laneLabel: '', lane: -1 },
-  { index: 11, pitch: 'F4', accidental: 0, label: '4', lane: 4, laneLabel: '4' },
+  { index: 11, pitch: 'F4', accidental: 0, label: '4', lane: 3, laneLabel: '4' },
   // 第 4 行：6 ♯5 5 ♯4
-  { index: 12, pitch: 'A4', accidental: 0, label: '6', lane: 4, laneLabel: '6' },
-  { index: 13, pitch: 'G4', accidental: 1, label: '♯5', subLabel: '♭6', lane: 5, laneLabel: '♯5' },
-  { index: 14, pitch: 'G4', accidental: 0, label: '5', lane: 5, laneLabel: '5' },
-  { index: 15, pitch: 'F4', accidental: 1, label: '♯4', subLabel: '♭5', lane: 6, laneLabel: '♯4' },
+  { index: 12, pitch: 'A4', accidental: 0, label: '6', lane: 5, laneLabel: '6' },
+  { index: 13, pitch: 'G4', accidental: 1, label: '♯5', subLabel: '♭6', lane: 4, laneLabel: '♯5' },
+  { index: 14, pitch: 'G4', accidental: 0, label: '5', lane: 4, laneLabel: '5' },
+  { index: 15, pitch: 'F4', accidental: 1, label: '♯4', subLabel: '♭5', lane: 3, laneLabel: '♯4' },
 ];
 
 export function getKeyConfig(mode: 'normal' | 'slide'): KeyConfig[] {

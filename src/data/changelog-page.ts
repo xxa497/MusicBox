@@ -11,6 +11,17 @@ export interface IChangelogEntry {
 
 export const MOCK_CHANGELOGS: IChangelogEntry[] = [
   {
+    id: '17',
+    version: '4.5.8',
+    date: '2026-11-15',
+    items: [
+      {
+        type: 'fix',
+        text: '修复音符条落错音轨的问题：2 按下时不见条、6 的条跑到 4 的位置，是因为条按「按键位置」找列、而不是按音轨编号找列；现在十二个键都落在自己那条音轨上，滑键模式同样修正。',
+      },
+    ],
+  },
+  {
     id: '16',
     version: 'v4.5.7',
     date: '2026-11-14',
